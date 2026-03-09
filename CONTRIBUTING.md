@@ -15,7 +15,7 @@ Welcome to the lobster tank! 🦞
 
 For the current maintainer list, check the original OpenClaw contributing guide:
 [openclaw/openclaw `CONTRIBUTING.md`](https://github.com/openclaw/openclaw/blob/main/CONTRIBUTING.md).
- 
+
 ## How to Contribute
 
 1. **Bugs & small fixes** → Open a PR!
@@ -25,7 +25,7 @@ For the current maintainer list, check the original OpenClaw contributing guide:
 ## Before You PR
 
 - Test locally with your OpenClaw instance
-- Run tests: `pnpm build && pnpm check && pnpm test`
+- Run tests: `pnpm build && pnpm check && pnpm test:coverage`
 - Ensure CI checks pass
 - Keep PRs focused (one thing per PR; do not mix unrelated concerns)
 - Describe what & why
