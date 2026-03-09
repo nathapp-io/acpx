@@ -30,7 +30,7 @@
   "scripts": {
     "build": "tsdown src/cli.ts --format esm --dts --clean --platform node --target node22 --no-fixedExtension",
     "build:test": "node -e \"require('node:fs').rmSync('dist-test',{recursive:true,force:true})\" && tsc -p tsconfig.test.json",
-    "check": "pnpm run format:check && pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test",
+    "check": "pnpm run format:check && pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test:coverage",
     "check:docs": "pnpm run format:docs:check && pnpm run lint:docs",
     "dev": "tsx src/cli.ts",
     "format": "oxfmt --write",
@@ -48,6 +48,7 @@
     "release": "release-it",
     "release:ci": "release-it --ci",
     "test": "pnpm run build:test && node --test dist-test/test/*.test.js",
+    "test:coverage": "pnpm run build:test && node --experimental-test-coverage --test-coverage-lines=83 --test-coverage-branches=76 --test-coverage-functions=86 --test dist-test/test/*.test.js",
     "typecheck": "tsgo --noEmit",
     "typecheck:tsc": "tsc --noEmit"
   },
