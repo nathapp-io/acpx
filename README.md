@@ -339,7 +339,7 @@ spawns the ACP bridge directly without `pnpm` wrapper noise:
 
 ## Full CLI reference
 
-See `docs/CLI.md`.
+See [docs/CLI.md](docs/CLI.md).
 
 ## License
 
