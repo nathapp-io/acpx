@@ -20,7 +20,7 @@ test("resolveAgentCommand returns raw value for unknown agents", () => {
 test("listBuiltInAgents preserves the required built-in example order", () => {
   const agents = listBuiltInAgents();
   assert.deepEqual(agents, Object.keys(AGENT_REGISTRY));
-  assert.deepEqual(agents.slice(0, 7), [
+  assert.deepEqual(agents, [
     "pi",
     "openclaw",
     "codex",
@@ -28,6 +28,12 @@ test("listBuiltInAgents preserves the required built-in example order", () => {
     "gemini",
     "cursor",
     "copilot",
+    "droid",
+    "kimi",
+    "opencode",
+    "kiro",
+    "kilocode",
+    "qwen",
   ]);
 });
 

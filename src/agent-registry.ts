@@ -12,6 +12,7 @@ export const AGENT_REGISTRY: Record<string, string> = {
   gemini: "gemini --acp",
   cursor: "cursor-agent acp",
   copilot: "copilot --acp --stdio",
+  droid: "droid exec --output-format acp",
   kimi: "kimi acp",
   opencode: "npx -y opencode-ai acp",
   kiro: "kiro-cli acp",

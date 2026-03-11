@@ -72,6 +72,33 @@ test("integration: built-in cursor agent resolves to cursor-agent acp", async ()
   });
 });
 
+test("integration: built-in droid agent resolves to droid exec --output-format acp", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-droid-"));
+
+    try {
+      await writeFakeDroidAgent(fakeBinDir);
+
+      const result = await runCli(
+        ["--approve-all", "--cwd", cwd, "--format", "quiet", "droid", "exec", "echo hello"],
+        homeDir,
+        {
+          env: {
+            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /hello/);
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: exec forwards model, allowed-tools, and max-turns in session/new _meta", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -1519,6 +1546,44 @@ async function writeFakeCursorAgent(binDir: string): Promise<void> {
     path.join(binDir, "cursor-agent"),
     [
       "#!/bin/sh",
+      'if [ "$1" = "acp" ]; then',
+      "  shift",
+      "fi",
+      `exec "${process.execPath}" "${MOCK_AGENT_PATH}" "$@"`,
+      "",
+    ].join("\n"),
+    { encoding: "utf8", mode: 0o755 },
+  );
+}
+
+async function writeFakeDroidAgent(binDir: string): Promise<void> {
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      path.join(binDir, "droid.cmd"),
+      [
+        "@echo off",
+        "setlocal",
+        'if /I "%~1"=="exec" shift',
+        'if /I "%~1"=="--output-format" shift',
+        'if /I "%~1"=="acp" shift',
+        `"${process.execPath}" "${MOCK_AGENT_PATH}" %*`,
+        "",
+      ].join("\r\n"),
+      { encoding: "utf8" },
+    );
+    return;
+  }
+
+  await fs.writeFile(
+    path.join(binDir, "droid"),
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "exec" ]; then',
+      "  shift",
+      "fi",
+      'if [ "$1" = "--output-format" ]; then',
+      "  shift",
+      "fi",
       'if [ "$1" = "acp" ]; then',
       "  shift",
       "fi",

@@ -288,6 +288,7 @@ Built-ins:
 | `gemini`   | native (`gemini --acp`)                                                | [Gemini CLI](https://github.com/google/gemini-cli)                                                              |
 | `cursor`   | native (`cursor-agent acp`)                                            | [Cursor CLI](https://cursor.com/docs/cli/acp)                                                                   |
 | `copilot`  | native (`copilot --acp --stdio`)                                       | [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-chat/use-copilot-chat-in-the-command-line) |
+| `droid`    | native (`droid exec --output-format acp`)                              | [Factory Droid](https://www.factory.ai)                                                                         |
 | `kimi`     | native (`kimi acp`)                                                    | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)                                                              |
 | `opencode` | `npx -y opencode-ai acp`                                               | [OpenCode](https://opencode.ai)                                                                                 |
 | `kiro`     | native (`kiro-cli acp`)                                                | [Kiro CLI](https://kiro.dev)                                                                                    |
