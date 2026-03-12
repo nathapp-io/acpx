@@ -157,6 +157,23 @@ function emitJsonResult(format: OutputFormat, payload: unknown): boolean {
   return true;
 }
 
+function isCodexAgentInvocation(agent: { agentName: string; agentCommand: string }): boolean {
+  if (agent.agentName === "codex") {
+    return true;
+  }
+  return /\bcodex-acp\b/.test(agent.agentCommand);
+}
+
+function resolveCompatibleConfigId(
+  agent: { agentName: string; agentCommand: string },
+  configId: string,
+): string {
+  if (isCodexAgentInvocation(agent) && configId === "thought_level") {
+    return "reasoning_effort";
+  }
+  return configId;
+}
+
 export { parseAllowedTools, parseMaxTurns, parseTtlSeconds };
 export { formatPromptSessionBannerLine } from "./cli/output-render.js";
 
@@ -520,6 +537,7 @@ async function handleSetConfigOption(
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
+  const resolvedConfigId = resolveCompatibleConfigId(agent, configId);
   const { setSessionConfigOption } = await loadSessionModule();
   const record = await findRoutedSessionOrThrow(
     agent.agentCommand,
@@ -529,7 +547,7 @@ async function handleSetConfigOption(
   );
   const result = await setSessionConfigOption({
     sessionId: record.acpxRecordId,
-    configId,
+    configId: resolvedConfigId,
     value,
     mcpServers: config.mcpServers,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
@@ -1590,7 +1608,7 @@ Examples:
   acpx codex exec "what does this repo do"
   acpx codex cancel
   acpx codex set-mode plan
-  acpx codex set approval_policy conservative
+  acpx codex set thought_level high
   acpx codex -s backend "fix the API"
   acpx codex sessions
   acpx codex sessions new --name backend
