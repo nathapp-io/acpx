@@ -622,6 +622,18 @@ async function testFeatureDirectly(pr, validationPath) {
   await ensureProjectDependencies(pr.workdir);
   const testPlan = buildTargetedTestPlan(pr.changedFiles);
   if (testPlan.commands.length === 0) {
+    if (validationPath?.feature_validation === "standard_checks") {
+      return {
+        validation_status: "standard_checks_sufficient",
+        route: "judge_refactor",
+        summary:
+          "This PR stays on the feature path, but normal repo review and CI are the meaningful validation rather than a bespoke targeted local test command.",
+        targeted_tests: [],
+        integration_tests: [],
+        e2e_tests: [],
+      };
+    }
+
     return {
       validation_status: "feature_not_validated",
       route: "comment_and_escalate_to_human",
@@ -901,12 +913,15 @@ function promptBugOrFeature(pr) {
     "Decide which validation path this PR should take before refactor or review.",
     "Use `bug` if this PR primarily claims to fix a bug, regression, broken behavior, or other issue that should first be reproduced and then proven fixed.",
     "Use `feature` if this PR primarily adds or changes behavior that should be validated directly without first reproducing a prior failure.",
+    "Dependency-only, tooling-only, docs-only, or lockfile-only maintenance PRs should still use the `feature` path.",
+    "For feature-path work, also decide whether direct targeted local testing is required or whether normal repo review and CI are the meaningful validation.",
     "If you cannot classify it confidently, route to `comment_and_escalate_to_human`.",
     ...exactJsonResponse([
       "Return exactly one JSON object with this shape:",
       "{",
       '  "classification": "bug" | "feature" | "unclear",',
       '  "route": "reproduce_bug_and_test_fix" | "test_feature_directly" | "comment_and_escalate_to_human",',
+      '  "feature_validation": "targeted_tests" | "standard_checks" | null,',
       '  "reason": "short explanation"',
       "}",
     ]),

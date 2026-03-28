@@ -59,3 +59,21 @@ test("fix_ci_failures owns CI monitoring until a terminal state", () => {
     assert.doesNotMatch(edgeBlock, /collect_ci_state:/);
   });
 });
+
+test("maintenance PRs stay on the feature path without adding a new flow node", () => {
+  const sourcePath = path.join(process.cwd(), "examples/flows/pr-triage/pr-triage.flow.ts");
+
+  return fs.readFile(sourcePath, "utf8").then((source) => {
+    assert.match(
+      source,
+      /Dependency-only, tooling-only, docs-only, or lockfile-only maintenance PRs should still use the `feature` path\./,
+    );
+    assert.match(source, /"feature_validation": "targeted_tests" \| "standard_checks" \| null,/);
+    assert.match(
+      source,
+      /validation_status:\s*"standard_checks_sufficient"[\s\S]*route:\s*"judge_refactor"/,
+    );
+    assert.doesNotMatch(source, /validate_via_standard_checks:/);
+    assert.doesNotMatch(source, /supportsStandardChecksValidation/);
+  });
+});
