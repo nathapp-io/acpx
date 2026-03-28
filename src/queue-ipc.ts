@@ -32,6 +32,7 @@ import type {
 } from "./types.js";
 
 export { QUEUE_CONNECT_RETRY_MS } from "./queue-ipc-transport.js";
+export const MAX_MESSAGE_BUFFER_SIZE = 10 * 1024 * 1024;
 export {
   isProcessAlive,
   releaseQueueOwnerLease,
@@ -217,6 +218,12 @@ async function runQueueOwnerRequest<TResult>(options: {
 
     socket.on("data", (chunk: string) => {
       buffer += chunk;
+
+      if (buffer.length > MAX_MESSAGE_BUFFER_SIZE) {
+        socket.destroy();
+        finishReject(new Error(`Message buffer exceeded ${MAX_MESSAGE_BUFFER_SIZE} bytes`));
+        return;
+      }
 
       let index = buffer.indexOf("\n");
       while (index >= 0) {
