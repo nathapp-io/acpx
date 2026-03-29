@@ -113,3 +113,22 @@ test("validation stays in ACP nodes instead of hardcoded runtime helpers", () =>
     assert.doesNotMatch(source, /runShellLine/);
   });
 });
+
+test("judge_refactor asks whether anything should be added removed simplified or refactored", () => {
+  const sourcePath = path.join(process.cwd(), "examples/flows/pr-triage/pr-triage.flow.ts");
+
+  return fs.readFile(sourcePath, "utf8").then((source) => {
+    assert.match(
+      source,
+      /Judge whether this PR is ready as-is, or whether anything should be added, removed, simplified, or refactored before it continues\./,
+    );
+    assert.match(
+      source,
+      /Use `superficial` if the main direction is fine but there is still some minor thing that should be added, removed, simplified, or locally refactored first\./,
+    );
+    assert.match(
+      source,
+      /If a PR fixes the validated issue but also introduces extra behavior or special-case logic beyond the minimum needed for that fix, prefer `superficial` over `none` unless it was necessary to prove the issue resolved\./,
+    );
+  });
+});
