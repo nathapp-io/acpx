@@ -86,6 +86,7 @@ import { extractAcpError } from "./error-shapes.js";
 import { isSessionUpdateNotification } from "./jsonrpc.js";
 import {
   formatSessionControlAcpSummary,
+  isLikelySessionControlUnsupportedError,
   maybeWrapSessionControlError,
 } from "./session-control-errors.js";
 import { TerminalManager } from "./terminal-manager.js";
@@ -234,6 +235,21 @@ function createNdJsonMessageStream(
   return { readable, writable };
 }
 
+function resolveModelIdFromConfigOptionResponse(
+  response: SetSessionConfigOptionResponse,
+  fallbackModelId: string,
+): string {
+  for (const option of response.configOptions) {
+    if (option.id !== "model") {
+      continue;
+    }
+    if (typeof option.currentValue === "string" && option.currentValue.trim().length > 0) {
+      return option.currentValue;
+    }
+  }
+  return fallbackModelId;
+}
+
 export class AcpClient {
   private options: AcpClientOptions;
   private connection?: ClientSideConnection;
@@ -346,6 +362,21 @@ export class AcpClient {
 
   clearEventHandlers(): void {
     this.eventHandlers = {};
+  }
+
+  updateSessionOptions(update: Partial<NonNullable<AcpClientOptions["sessionOptions"]>>): void {
+    if (!this.options.sessionOptions) {
+      this.options.sessionOptions = {};
+    }
+    if (update.model !== undefined) {
+      this.options.sessionOptions.model = update.model;
+    }
+    if (update.allowedTools !== undefined) {
+      this.options.sessionOptions.allowedTools = update.allowedTools;
+    }
+    if (update.maxTurns !== undefined) {
+      this.options.sessionOptions.maxTurns = update.maxTurns;
+    }
   }
 
   updateRuntimeOptions(options: {
@@ -682,6 +713,7 @@ export class AcpClient {
           sessionId,
           cwd: asAbsoluteCwd(cwd),
           mcpServers: this.options.mcpServers ?? [],
+          _meta: buildClaudeCodeOptionsMeta(this.options.sessionOptions),
         }),
       );
 
@@ -769,6 +801,46 @@ export class AcpClient {
     value: string,
   ): Promise<SetSessionConfigOptionResponse> {
     const connection = this.getConnection();
+    // For model changes: prefer session/set_config_option (supports alias resolution
+    // via resolveModelPreference on Claude adapter) then fall back to session/set_model
+    // for adapters like Droid that only support the dedicated method.
+    if (configId === "model") {
+      try {
+        const response = await this.runConnectionRequest(() =>
+          connection.setSessionConfigOption({
+            sessionId,
+            configId,
+            value,
+          }),
+        );
+        const resolvedModelId = resolveModelIdFromConfigOptionResponse(response, value);
+        await this.tryApplySessionModelAfterConfigOption(sessionId, resolvedModelId);
+        return response;
+      } catch (error) {
+        const acp = extractAcpError(error);
+        if (acp && isLikelySessionControlUnsupportedError(acp)) {
+          // Adapter doesn't support set_config_option — fall back to set_model
+          try {
+            await this.runConnectionRequest(() =>
+              connection.unstable_setSessionModel({ sessionId, modelId: value }),
+            );
+            return { configOptions: [] };
+          } catch (fallbackError) {
+            throw maybeWrapSessionControlError(
+              "session/set_model",
+              fallbackError,
+              `for model="${value}"`,
+            );
+          }
+        }
+        throw maybeWrapSessionControlError(
+          "session/set_config_option",
+          error,
+          `for "model"="${value}"`,
+        );
+      }
+    }
+
     try {
       return await this.runConnectionRequest(() =>
         connection.setSessionConfigOption({
@@ -783,6 +855,36 @@ export class AcpClient {
         error,
         `for "${configId}"="${value}"`,
       );
+    }
+  }
+
+  private async tryApplySessionModelAfterConfigOption(
+    sessionId: string,
+    modelId: string,
+  ): Promise<void> {
+    const connection = this.getConnection();
+    try {
+      await this.runConnectionRequest(() =>
+        connection.unstable_setSessionModel({
+          sessionId,
+          modelId,
+        }),
+      );
+    } catch (error) {
+      const acp = extractAcpError(error);
+      if (acp && isLikelySessionControlUnsupportedError(acp)) {
+        return;
+      }
+      if (this.options.verbose) {
+        const summary = acp
+          ? formatSessionControlAcpSummary(acp)
+          : error instanceof Error
+            ? error.message
+            : String(error);
+        process.stderr.write(
+          `[acpx] warning: session/set_model after session/set_config_option failed: ${summary}\n`,
+        );
+      }
     }
   }
 

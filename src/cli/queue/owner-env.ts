@@ -79,6 +79,22 @@ export function parseQueueOwnerPayload(raw: string): QueueOwnerRuntimeOptions {
     options.promptRetries = Math.max(0, Math.round(record.promptRetries));
   }
 
+  const sessionOpts = asRecord(record.sessionOptions);
+  if (sessionOpts) {
+    options.sessionOptions = {};
+    if (typeof sessionOpts.model === "string" && sessionOpts.model.trim().length > 0) {
+      options.sessionOptions.model = sessionOpts.model;
+    }
+    if (Array.isArray(sessionOpts.allowedTools)) {
+      options.sessionOptions.allowedTools = sessionOpts.allowedTools.filter(
+        (t): t is string => typeof t === "string",
+      );
+    }
+    if (typeof sessionOpts.maxTurns === "number" && Number.isFinite(sessionOpts.maxTurns)) {
+      options.sessionOptions.maxTurns = Math.max(1, Math.round(sessionOpts.maxTurns));
+    }
+  }
+
   return options;
 }
 

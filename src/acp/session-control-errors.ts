@@ -9,7 +9,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
-function isLikelySessionControlUnsupportedError(acp: {
+export function isLikelySessionControlUnsupportedError(acp: {
   code: number;
   message: string;
   data?: unknown;

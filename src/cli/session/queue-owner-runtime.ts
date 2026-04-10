@@ -5,7 +5,7 @@ import { checkpointPerfMetricsCapture } from "../../perf-metrics-capture.js";
 import { setPerfGauge } from "../../perf-metrics.js";
 import { promptToDisplayText } from "../../prompt-content.js";
 import { applyLifecycleSnapshotToRecord } from "../../runtime/engine/lifecycle.js";
-import { sessionOptionsFromRecord } from "../../runtime/engine/session-options.js";
+import { mergeSessionOptions, sessionOptionsFromRecord } from "../../runtime/engine/session-options.js";
 import {
   absolutePath,
   resolveSessionRecord,
@@ -17,6 +17,7 @@ import {
   SessionQueueOwner,
   releaseQueueOwnerLease,
   tryAcquireQueueOwnerLease,
+  trySetConfigOptionOnRunningOwner,
   trySubmitToRunningOwner,
   waitMs,
 } from "../queue/ipc.js";
@@ -56,6 +57,7 @@ async function submitToRunningOwner(
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     waitForCompletion,
     verbose: options.verbose,
+    sessionOptions: options.sessionOptions,
   });
 }
 
@@ -78,7 +80,10 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     authPolicy: options.authPolicy,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
-    sessionOptions: sessionOptionsFromRecord(sessionRecord),
+    sessionOptions: mergeSessionOptions(
+      options.sessionOptions,
+      sessionOptionsFromRecord(sessionRecord),
+    ),
   });
   const ttlMs = normalizeQueueOwnerTtlMs(options.ttlMs);
   const maxQueueDepth = Math.max(1, Math.round(options.maxQueueDepth ?? 16));
@@ -112,6 +117,25 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
       });
     },
     setSessionConfigOptionFallback: async (configId: string, value: string, timeoutMs?: number) => {
+      // If the sharedClient has a reusable session, route through it directly
+      // instead of creating a temporary connection that doesn't affect the live session.
+      const currentRecord = await resolveSessionRecord(options.sessionId);
+      if (sharedClient.hasReusableSession(currentRecord.acpSessionId)) {
+        const response = await withTimeout(
+          (async () =>
+            await sharedClient.setSessionConfigOption(
+              currentRecord.acpSessionId,
+              configId,
+              value,
+            ))(),
+          timeoutMs,
+        );
+        if (configId === "model") {
+          sharedClient.updateSessionOptions({ model: value });
+        }
+        return response;
+      }
+
       const result = await runSessionSetConfigOptionDirect({
         sessionRecordId: options.sessionId,
         configId,
@@ -123,6 +147,10 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
         timeoutMs,
         verbose: options.verbose,
       });
+      // Update sharedClient session options so future reconnects use the latest model.
+      if (configId === "model") {
+        sharedClient.updateSessionOptions({ model: value });
+      }
       return result.response;
     },
   });
@@ -226,6 +254,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
             authPolicy: options.authPolicy,
             suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
             promptRetries: options.promptRetries,
+            sessionOptions: options.sessionOptions,
             onClientAvailable: setActiveController,
             onClientClosed: clearActiveController,
             onPromptActive: async () => {
@@ -266,6 +295,24 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
 
 export async function sendSession(options: SessionSendOptions): Promise<SessionSendOutcome> {
   const waitForCompletion = options.waitForCompletion !== false;
+
+  // If a model is requested and an owner is already running, update the model
+  // before submitting the prompt.
+  if (options.sessionOptions?.model) {
+    await trySetConfigOptionOnRunningOwner(
+      options.sessionId,
+      "model",
+      options.sessionOptions.model,
+      options.timeoutMs,
+      options.verbose,
+    ).catch((err: unknown) => {
+      if (options.verbose) {
+        process.stderr.write(
+          `[acpx] warning: failed to pre-set model on running owner: ${formatErrorMessage(err)}\n`,
+        );
+      }
+    });
+  }
 
   const queuedToOwner = await submitToRunningOwner(options, waitForCompletion);
   if (queuedToOwner) {

@@ -972,6 +972,48 @@ test("integration: exec --model skips session/set_model when agent does not adve
   });
 });
 
+test("integration: prompt --model updates existing session model before prompt", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      const ensured = await runCli(
+        [...baseAgentArgs(cwd), "sessions", "ensure", "--name", "model-prompt-session"],
+        homeDir,
+      );
+      assert.equal(ensured.code, 0, ensured.stderr);
+
+      const result = await runCli(
+        [
+          ...baseAgentArgs(cwd),
+          "--format",
+          "json",
+          "--model",
+          "haiku",
+          "prompt",
+          "-s",
+          "model-prompt-session",
+          "echo hello",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const setConfigRequest = payloads.find(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: string; value?: string } | undefined)?.configId ===
+            "model" &&
+          (payload.params as { configId?: string; value?: string } | undefined)?.value === "haiku",
+      );
+      assert(setConfigRequest, "expected session/set_config_option for model=haiku");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: exec --model fails when session/set_model fails", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

@@ -14,7 +14,11 @@ import {
 } from "../../runtime/engine/lifecycle.js";
 import { runPromptTurn } from "../../runtime/engine/prompt-turn.js";
 import { connectAndLoadSession } from "../../runtime/engine/reconnect.js";
-import { sessionOptionsFromRecord } from "../../runtime/engine/session-options.js";
+import {
+  mergeSessionOptions,
+  sessionOptionsFromRecord,
+  type SessionAgentOptions,
+} from "../../runtime/engine/session-options.js";
 import {
   cloneSessionAcpxState,
   cloneSessionConversation,
@@ -24,7 +28,7 @@ import {
   trimConversationForRuntime,
 } from "../../session/conversation-model.js";
 import { SessionEventWriter } from "../../session/events.js";
-import { absolutePath, isoNow, resolveSessionRecord } from "../../session/persistence.js";
+import { absolutePath, isoNow, resolveSessionRecord, writeSessionRecord } from "../../session/persistence.js";
 import type {
   AcpJsonRpcMessage,
   AcpMessageDirection,
@@ -66,6 +70,7 @@ type RunSessionPromptOptions = {
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
   promptRetries?: number;
+  sessionOptions?: SessionAgentOptions;
   onClientAvailable?: (controller: ActiveSessionController) => void;
   onClientClosed?: () => void;
   onPromptActive?: () => Promise<void> | void;
@@ -274,6 +279,7 @@ export async function runQueuedTask(
     authPolicy?: AuthPolicy;
     suppressSdkConsoleErrors?: boolean;
     promptRetries?: number;
+    sessionOptions?: SessionAgentOptions;
     onClientAvailable?: (controller: ActiveSessionController) => void;
     onClientClosed?: () => void;
     onPromptActive?: () => Promise<void> | void;
@@ -299,11 +305,20 @@ export async function runQueuedTask(
       suppressSdkConsoleErrors: task.suppressSdkConsoleErrors ?? options.suppressSdkConsoleErrors,
       verbose: options.verbose,
       promptRetries: options.promptRetries,
+      sessionOptions: mergeSessionOptions(task.sessionOptions, options.sessionOptions),
       onClientAvailable: options.onClientAvailable,
       onClientClosed: options.onClientClosed,
       onPromptActive: options.onPromptActive,
       client: options.sharedClient,
     });
+
+    // Persist the record after each prompt so control commands see updated acpSessionId
+    // if loadSession fallback recreated the backend session.
+    if (result.record) {
+      await writeSessionRecord(result.record).catch(() => {
+        // best effort — control commands still work via sharedClient
+      });
+    }
 
     if (task.waitForCompletion) {
       task.send({
@@ -398,7 +413,7 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
       authPolicy: options.authPolicy,
       suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
       verbose: options.verbose,
-      sessionOptions: sessionOptionsFromRecord(record),
+      sessionOptions: mergeSessionOptions(options.sessionOptions, sessionOptionsFromRecord(record)),
     });
   client.updateRuntimeOptions({
     permissionMode: options.permissionMode,
@@ -502,6 +517,10 @@ async function runSessionPrompt(options: RunSessionPromptOptions): Promise<Sessi
           process.stderr.write(
             `[acpx] ${formatPerfMetric("prompt.connect_and_load", Date.now() - connectStartedAt)}\n`,
           );
+        }
+
+        if (options.sessionOptions?.model) {
+          await client.setSessionConfigOption(activeSessionId, "model", options.sessionOptions.model);
         }
 
         output.setContext({
@@ -789,6 +808,7 @@ export async function sendSessionDirect(options: SessionSendOptions): Promise<Se
     timeoutMs: options.timeoutMs,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
     verbose: options.verbose,
+    sessionOptions: options.sessionOptions,
     client: options.client,
   });
 }

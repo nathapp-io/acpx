@@ -12,7 +12,11 @@ import type {
 } from "../../types.js";
 import { applyLifecycleSnapshotToRecord } from "./lifecycle.js";
 import { connectAndLoadSession, type ConnectedSessionController } from "./reconnect.js";
-import { sessionOptionsFromRecord } from "./session-options.js";
+import {
+  mergeSessionOptions,
+  sessionOptionsFromRecord,
+  type SessionAgentOptions,
+} from "./session-options.js";
 
 export type FullConnectedSessionController = ConnectedSessionController & {
   setSessionModel: (modelId: string) => Promise<void>;
@@ -44,6 +48,7 @@ export type WithConnectedSessionOptions<T> = {
   resumePolicy?: SessionResumePolicy;
   timeoutMs?: number;
   verbose?: boolean;
+  sessionOptions?: SessionAgentOptions;
   onClientAvailable?: (controller: FullConnectedSessionController) => void;
   onClientClosed?: () => void;
   onConnectedRecord?: (record: SessionRecord) => void;
@@ -92,7 +97,7 @@ export async function withConnectedSession<T>(
       authCredentials: options.authCredentials,
       authPolicy: options.authPolicy,
       verbose: options.verbose,
-      sessionOptions: sessionOptionsFromRecord(record),
+      sessionOptions: mergeSessionOptions(options.sessionOptions, sessionOptionsFromRecord(record)),
     }) ??
     new AcpClient({
       agentCommand: record.agentCommand,
@@ -103,7 +108,7 @@ export async function withConnectedSession<T>(
       authCredentials: options.authCredentials,
       authPolicy: options.authPolicy,
       verbose: options.verbose,
-      sessionOptions: sessionOptionsFromRecord(record),
+      sessionOptions: mergeSessionOptions(options.sessionOptions, sessionOptionsFromRecord(record)),
     });
   let activeSessionIdForControl = record.acpSessionId;
   let notifiedClientAvailable = false;
