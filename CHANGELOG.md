@@ -8,44 +8,43 @@ Repo: https://github.com/openclaw/acpx
 
 ### Changes
 
-- Agents/built-ins: bump the default `@zed-industries/codex-acp` package range to `^0.12.0` and `pi-acp` to `^0.0.26` so fresh built-in launches pick up the latest adapter releases.
+### Breaking
+
+### Fixes
+
+## 2026.4.25 (v0.6.0)
+
+### Changes
+
 - CLI/claude: add `--system-prompt <text>` and `--append-system-prompt <text>` global flags that forward through ACP `_meta.systemPrompt` on `session/new`, letting callers replace or append to the Claude Code system prompt without dropping out of persistent acpx sessions. The value is persisted in `session_options.system_prompt` so ensure/reuse flows keep the override. Codex and other agents ignore the field. (#229) Thanks @Vercantez.
 - CLI/sessions: add `sessions prune` with `--dry-run`, age filters, and `--include-history` so closed session records and optional event streams can be cleaned up explicitly. (#227) Thanks @coder999999999.
-- CLI/ACP: add `--no-terminal` to disable advertised ACP terminal capability for new agent clients. (#155) Thanks @DMQ.
 - Runtime/embedding: add `startTurn(...)` turn handles so embedders can observe live runtime events separately from terminal completion, cancel a turn, or close only the event stream while preserving `runTurn(...)` compatibility. (#262) Thanks @enki.
+- CLI/ACP: add `--no-terminal` to disable advertised ACP terminal capability for new agent clients. (#155) Thanks @DMQ.
+- Agents/built-ins: bump the default `@agentclientprotocol/claude-agent-acp`, `@zed-industries/codex-acp`, and `pi-acp` package ranges so fresh built-in launches pick up the latest adapter releases. (#253, #275) Thanks @flowforgelab.
+- Conformance/ACP: add a post-success drain case that catches late tool updates emitted after `session/prompt` resolves. (#252) Thanks @logofet85-ai.
+- Docs/session identity: clarify when CLI output shows ACPX runtime session IDs versus backend agent session IDs.
+- Dependencies/CI: update ACP SDK, runtime dependencies, TypeScript-native tooling, formatter/lint tooling, and workflow actions.
 
 ### Breaking
 
 ### Fixes
 
 - CLI/runtime: persist non-mode `session/set_config_option` values and replay them on fresh adapter sessions, so options such as Codex `reasoning_effort` survive session fallback/reuse. (#138)
-- CLI/sessions: persist the submitted prompt at turn start so `sessions history` and `sessions read` no longer report `No history` while an active prompt is already running. (#157)
-- Output/errors: add text-mode remediation hints for timeouts, provider rate limits, and invalid model names.
-- CLI/quiet output: emit final token usage and cost metadata to stderr when adapters include it in the ACP prompt result, while keeping quiet stdout as assistant text only. (#257)
-- Runtime/doctor: guarantee `doctor().details` contains strings even when probe failures include Error or object values. (#267)
-- Runtime/WSL: translate session cwd with `wslpath` when running under WSL and spawning Windows `.exe` ACP agents, so `session/new` and `session/load` receive paths the agent can access. (#232)
-- CLI/status: report resumable persistent sessions as `idle` when no queue owner is running, instead of marking pre-prompt or TTL-expired sessions as dead. (#185)
 - CLI/prompt: honor `--model` when sending prompts to existing persistent sessions, including queued owner paths. (#211) Thanks @skywills.
-- Claude/built-in: bump the owned `@agentclientprotocol/claude-agent-acp` package range to `^0.31.0` so fresh built-in launches include the Opus 4.7 adapter update and later ACP compatibility fixes. (#253) Thanks @flowforgelab.
-
-## 2026.4.25 (v0.6.0)
-
-### Changes
-
-- Conformance/ACP: add a post-success drain case that catches late tool updates emitted after `session/prompt` resolves. (#252) Thanks @logofet85-ai.
-- Dependencies/CI: update ACP SDK, TypeScript-native tooling, formatter/lint tooling, and the pnpm setup action.
-
-### Breaking
-
-### Fixes
-
 - Runtime/persistent sessions: keep reusable persistent ACP clients warm across turns and close pooled clients during runtime close. (#265) Thanks @Sway-Chan.
 - Runtime/ACP: drain late post-success session updates before closing prompt turns so adapters that resolve `session/prompt` before final updates do not drop assistant output. (#251) Thanks @logofet85-ai.
+- Runtime/embedding: reuse the saved persistent session when sending runtime controls instead of creating a new backend session for control operations.
+- CLI/sessions: persist the submitted prompt at turn start so `sessions history` and `sessions read` no longer report `No history` while an active prompt is already running. (#157)
+- Runtime/WSL: translate session cwd with `wslpath` when running under WSL and spawning Windows `.exe` ACP agents, so `session/new` and `session/load` receive paths the agent can access. (#232)
+- Client/auth: require explicit `ACPX_AUTH_*` env vars or config `auth` entries for ACP auth-method selection, so ambient provider env like `OPENAI_API_KEY` no longer triggers unintended login flows in adapters such as `codex-acp`.
+- Config/agents: honor custom agent `args` arrays from config instead of silently dropping required adapter subcommands. (#199) Thanks @log-li.
 - CLI/queue: tighten persistent queue and IPC socket directories to owner-only permissions, including previously-created permissive directories. (#216) Thanks @garagon.
 - CLI/queue: use cryptographically random owner generation IDs so rapid queue owner restarts cannot reuse a stale generation token. (#207) Thanks @Yuan-ManX.
-- Config/agents: honor custom agent `args` arrays from config instead of silently dropping required adapter subcommands. (#199) Thanks @log-li.
-- Output/errors: add text-mode remediation hints for auth-required, missing-session, and common ACP session failures while keeping JSON error payloads stable. (#256) Thanks @SJeffZhang.
-- Client/auth: require explicit `ACPX_AUTH_*` env vars or config `auth` entries for ACP auth-method selection, so ambient provider env like `OPENAI_API_KEY` no longer triggers unintended login flows in adapters such as `codex-acp`.
+- Output/errors: add text-mode remediation hints for auth-required, missing-session, ACP session failures, timeouts, provider rate limits, and invalid model names while keeping JSON error payloads stable. (#256) Thanks @SJeffZhang.
+- CLI/quiet output: emit final token usage and cost metadata to stderr when adapters include it in the ACP prompt result, while keeping quiet stdout as assistant text only. (#257)
+- CLI/status: report resumable persistent sessions as `idle` when no queue owner is running, instead of marking pre-prompt or TTL-expired sessions as dead. (#185)
+- Client/ACP: use the locked ACP SDK close API path so session closing stays compatible with the current SDK.
+- Runtime/doctor: guarantee `doctor().details` contains strings even when probe failures include Error or object values. (#267)
 - Replay viewer: protect run-bundle file reads from run-id boundary escapes.
 
 ## 2026.4.8 (v0.5.3)
