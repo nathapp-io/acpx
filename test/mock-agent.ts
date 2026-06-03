@@ -550,11 +550,13 @@ function buildModelsState(currentModelId: string): SessionModelState {
   };
 }
 
+const DEFAULT_CONFIG_OPTION_MODEL_ID = "default";
+
 function createSessionState(hasCompletedPrompt = false): SessionState {
   return {
     hasCompletedPrompt,
     modeId: "auto",
-    modelId: DEFAULT_MODEL_ID,
+    modelId: DEFAULT_CONFIG_OPTION_MODEL_ID,
     configValues: {
       reasoning_effort: "medium",
     },

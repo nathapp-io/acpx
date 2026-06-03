@@ -164,7 +164,7 @@ async function applyDesiredModelToSession(params: {
 }): Promise<void> {
   if (!params.models) {
     const modelOpt = extractModelConfigOption(params.configOptions);
-    if (!modelOpt || modelOpt.currentValue === params.desiredModelId) {
+    if (!modelOpt || modelOpt.currentValue.trim() === params.desiredModelId.trim()) {
       return;
     }
     await withTimeout(
@@ -173,7 +173,7 @@ async function applyDesiredModelToSession(params: {
     );
     return;
   }
-  if (params.models.currentModelId !== params.desiredModelId) {
+  if (params.models.currentModelId.trim() !== params.desiredModelId.trim()) {
     await withTimeout(
       params.client.setSessionModel(params.sessionId, params.desiredModelId),
       params.timeoutMs,
@@ -208,12 +208,12 @@ async function replayDesiredModel(params: {
     await applyDesiredModelToSession({ ...params, desiredModelId });
     if (params.verbose) {
       process.stderr.write(
-        `[acpx] replayed desired model ${params.desiredModelId} on fresh ACP session ${params.sessionId} (previous ${params.previousSessionId})\n`,
+        `[acpx] replayed desired model ${desiredModelId} on fresh ACP session ${params.sessionId} (previous ${params.previousSessionId})\n`,
       );
     }
   } catch (error) {
     throw new SessionModelReplayError(
-      `Failed to replay saved session model ${params.desiredModelId} on fresh ACP session ${params.sessionId}: ${formatErrorMessage(error)}`,
+      `Failed to replay saved session model ${desiredModelId} on fresh ACP session ${params.sessionId}: ${formatErrorMessage(error)}`,
       {
         cause: error instanceof Error ? error : undefined,
         retryable: true,

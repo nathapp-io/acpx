@@ -1159,6 +1159,124 @@ test("integration: exec --model rejects models not advertised by the agent", asy
   });
 });
 
+test("integration: exec --model uses session/set_config_option when agent advertises via configOptions", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const configOptionsAgentCommand = `${MOCK_AGENT_COMMAND} --advertise-config-options`;
+
+    try {
+      const result = await runCli(
+        [
+          "--agent",
+          configOptionsAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "--model",
+          "gpt-5.4",
+          "exec",
+          "echo hello",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+
+      const setConfigRequest = payloads.find(
+        (payload) => payload.method === "session/set_config_option",
+      ) as { params?: { configId?: string; value?: string } } | undefined;
+      assert(setConfigRequest, "expected session/set_config_option request in JSON-RPC output");
+      assert.equal(setConfigRequest.params?.configId, "model");
+      assert.equal(setConfigRequest.params?.value, "gpt-5.4");
+
+      const setModelRequest = payloads.find((payload) => payload.method === "session/set_model");
+      assert.equal(setModelRequest, undefined, "session/set_model should not be called");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: exec --model fails when model not in configOptions advertised list", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const configOptionsAgentCommand = `${MOCK_AGENT_COMMAND} --advertise-config-options`;
+
+    try {
+      const result = await runCli(
+        [
+          "--agent",
+          configOptionsAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "--model",
+          "unknown-model",
+          "exec",
+          "echo hello",
+        ],
+        homeDir,
+      );
+      assert.notEqual(result.code, 0, "expected non-zero exit");
+      assert.match(`${result.stderr}\n${result.stdout}`, /did not advertise that model/);
+      assert.match(`${result.stderr}\n${result.stdout}`, /gpt-5\.4/);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const setConfigRequest = payloads.find(
+        (payload) => payload.method === "session/set_config_option",
+      );
+      assert.equal(setConfigRequest, undefined, "session/set_config_option should not be called");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: exec --model skips set_config_option when configOptions model already matches", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    // mock agent's configOptions currentValue starts as "default"
+    const configOptionsAgentCommand = `${MOCK_AGENT_COMMAND} --advertise-config-options`;
+
+    try {
+      const result = await runCli(
+        [
+          "--agent",
+          configOptionsAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "--model",
+          "default",
+          "exec",
+          "echo hello",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const setConfigRequest = payloads.find(
+        (payload) => payload.method === "session/set_config_option",
+      );
+      assert.equal(
+        setConfigRequest,
+        undefined,
+        "session/set_config_option should not be called when model already matches",
+      );
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: prompt --model updates existing session model before prompt", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

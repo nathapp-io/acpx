@@ -29,7 +29,7 @@ export async function applyRequestedModelIfAdvertised(params: {
     if (!modelOpt) {
       return false;
     }
-    if (modelOpt.currentValue === requestedModel) {
+    if (modelOpt.currentValue.trim() === requestedModel) {
       return true;
     }
     await withTimeout(
@@ -39,7 +39,7 @@ export async function applyRequestedModelIfAdvertised(params: {
     return true;
   }
 
-  if (params.models.currentModelId === requestedModel) {
+  if (params.models.currentModelId.trim() === requestedModel) {
     return true;
   }
   await withTimeout(

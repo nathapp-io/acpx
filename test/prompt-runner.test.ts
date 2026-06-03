@@ -129,7 +129,7 @@ test("runSessionSetConfigOptionDirect falls back to createSession and returns up
         name: "Model",
         category: "model",
         type: "select",
-        currentValue: "default-model",
+        currentValue: "default",
         options: [
           {
             value: "default",

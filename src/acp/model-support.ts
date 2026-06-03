@@ -1,4 +1,8 @@
-import type { SessionConfigOption, SessionModelState } from "@agentclientprotocol/sdk";
+import type {
+  SessionConfigOption,
+  SessionConfigSelectOption,
+  SessionModelState,
+} from "@agentclientprotocol/sdk";
 import { isClaudeAcpCommand } from "./agent-command.js";
 import { splitCommandLine } from "./client-process.js";
 
@@ -25,6 +29,14 @@ export function formatAvailableModelIds(models: SessionModelState | undefined): 
   return ids.length > 0 ? ids.join(", ") : "none advertised";
 }
 
+function flattenConfigSelectOptions(
+  opt: SessionConfigOption & { type: "select" },
+): SessionConfigSelectOption[] {
+  return (Array.isArray(opt.options) ? opt.options : []).flatMap((entry) =>
+    "options" in entry ? entry.options : [entry],
+  );
+}
+
 export function extractModelConfigOption(
   configOptions: SessionConfigOption[] | undefined,
 ): (SessionConfigOption & { type: "select" }) | undefined {
@@ -32,8 +44,8 @@ export function extractModelConfigOption(
     return undefined;
   }
   for (const opt of configOptions) {
-    if (opt.id === "model" && opt.type === "select") {
-      return opt as SessionConfigOption & { type: "select" };
+    if (opt.type === "select" && (opt.category === "model" || opt.id === "model")) {
+      return opt;
     }
   }
   return undefined;
@@ -46,8 +58,7 @@ export function formatConfigOptionModelIds(
   if (!opt) {
     return "none advertised";
   }
-  const ids = (Array.isArray(opt.options) ? opt.options : [])
-    .flatMap((entry) => ("options" in entry ? entry.options : [entry]))
+  const ids = flattenConfigSelectOptions(opt)
     .map((o) => o.value.trim())
     .filter((v) => v.length > 0);
   return ids.length > 0 ? ids.join(", ") : "none advertised";
@@ -64,12 +75,8 @@ function assertModelInConfigOptions(
       `Cannot ${action} "${requestedModel}": the ACP agent did not advertise model support. Generic model selection requires ACP models plus session/set_model support, or an adapter-specific startup model flag.`,
     );
   }
-  const advertised = new Set(
-    (Array.isArray(modelOpt.options) ? modelOpt.options : [])
-      .flatMap((entry) => ("options" in entry ? entry.options : [entry]))
-      .map((o) => o.value),
-  );
-  if (!advertised.has(requestedModel)) {
+  const advertised = new Set(flattenConfigSelectOptions(modelOpt).map((o) => o.value.trim()));
+  if (!advertised.has(requestedModel.trim())) {
     throw new RequestedModelUnsupportedError(
       `Cannot ${action} "${requestedModel}": the ACP agent did not advertise that model. Available models: ${formatConfigOptionModelIds(configOptions)}.`,
     );

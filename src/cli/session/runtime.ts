@@ -954,6 +954,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
           sessionId,
           requestedModel: options.sessionOptions?.model,
           models: createdSession.models,
+          configOptions: createdSession.configOptions,
           agentCommand: options.agentCommand,
           timeoutMs: options.timeoutMs,
         });
