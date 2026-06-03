@@ -4,7 +4,10 @@ import {
   isRetryablePromptError,
   normalizeOutputError,
 } from "../../acp/error-normalization.js";
-import { assertRequestedModelSupported } from "../../acp/model-support.js";
+import {
+  assertRequestedModelSupported,
+  extractModelConfigOption,
+} from "../../acp/model-support.js";
 import { InterruptedError, withInterrupt, withTimeout } from "../../async-control.js";
 export { InterruptedError, TimeoutError } from "../../async-control.js";
 import { formatPerfMetric, measurePerf, startPerfTimer } from "../../perf-metrics.js";
@@ -162,6 +165,26 @@ function advertisedModelsForRecord(record: SessionRecord):
   };
 }
 
+async function applyPromptModelViaConfigOption(params: {
+  client: AcpClient;
+  sessionId: string;
+  requestedModel: string;
+  record: SessionRecord;
+  timeoutMs?: number;
+}): Promise<void> {
+  const modelOpt = extractModelConfigOption(params.record.acpx?.config_options);
+  if (!modelOpt || modelOpt.currentValue.trim() === params.requestedModel) {
+    setDesiredModelId(params.record, params.requestedModel);
+    return;
+  }
+  await withTimeout(
+    params.client.setSessionConfigOption(params.sessionId, "model", params.requestedModel),
+    params.timeoutMs,
+  );
+  setDesiredModelId(params.record, params.requestedModel);
+  setCurrentModelId(params.record, params.requestedModel);
+}
+
 async function applyPromptModelIfAdvertised(params: {
   client: AcpClient;
   sessionId: string;
@@ -178,17 +201,20 @@ async function applyPromptModelIfAdvertised(params: {
   assertRequestedModelSupported({
     requestedModel,
     models,
+    configOptions: params.record.acpx?.config_options,
     agentCommand: params.record.agentCommand,
     context: "apply",
   });
+
   if (!models) {
-    return;
-  }
-  if (params.record.acpx?.current_model_id === requestedModel) {
-    setDesiredModelId(params.record, requestedModel);
+    await applyPromptModelViaConfigOption({ ...params, requestedModel });
     return;
   }
 
+  if (params.record.acpx?.current_model_id?.trim() === requestedModel) {
+    setDesiredModelId(params.record, requestedModel);
+    return;
+  }
   await withTimeout(
     params.client.setSessionModel(params.sessionId, requestedModel),
     params.timeoutMs,

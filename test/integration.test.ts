@@ -1319,6 +1319,52 @@ test("integration: prompt --model updates existing session model before prompt",
   });
 });
 
+test("integration: prompt --model uses session/set_config_option when agent advertises via configOptions", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const configOptionsAgentCommand = `${LOAD_CAPABLE_MOCK_AGENT_COMMAND} --advertise-config-options`;
+
+    try {
+      const created = await runCli(
+        ["--agent", configOptionsAgentCommand, "--approve-all", "--cwd", cwd, "sessions", "new"],
+        homeDir,
+      );
+      assert.equal(created.code, 0, created.stderr);
+
+      const result = await runCli(
+        [
+          "--agent",
+          configOptionsAgentCommand,
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "--model",
+          "gpt-5.4",
+          "prompt",
+          "echo hello",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const setConfigRequest = payloads.find(
+        (payload) => payload.method === "session/set_config_option",
+      ) as { params?: { configId?: string; value?: string } } | undefined;
+      assert(setConfigRequest, "expected session/set_config_option before the persistent prompt");
+      assert.equal(setConfigRequest.params?.configId, "model");
+      assert.equal(setConfigRequest.params?.value, "gpt-5.4");
+
+      const setModelRequest = payloads.find((payload) => payload.method === "session/set_model");
+      assert.equal(setModelRequest, undefined, "session/set_model should not be called");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: exec --model fails when session/set_model fails", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
