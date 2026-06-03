@@ -20,6 +20,7 @@
     "eslint/no-multi-str": "error",
     "eslint/no-new": "error",
     "eslint/no-new-wrappers": "error",
+    "eslint/no-underscore-dangle": ["error", { "allow": ["_meta"] }],
     "eslint/no-object-constructor": "error",
     "eslint/no-proto": "error",
     "eslint/no-regex-spaces": "error",

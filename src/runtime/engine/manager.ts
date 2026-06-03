@@ -703,6 +703,7 @@ export class AcpRuntimeManager {
       sessionId: session.sessionId,
       requestedModel: input.sessionOptions?.model,
       models: session.sessionResult.models,
+      configOptions: session.sessionResult.configOptions,
       agentCommand,
       timeoutMs: this.options.timeoutMs,
     });

@@ -58,6 +58,7 @@ async function createSessionRecordWithClient(
       sessionId,
       requestedModel: options.sessionOptions?.model,
       models: sessionModels,
+      configOptions: createdSession.configOptions,
       agentCommand: options.agentCommand,
       timeoutMs: options.timeoutMs,
     });
@@ -144,6 +145,7 @@ async function resumeSessionRecordWithClient(
         sessionId: options.resumeSessionId,
         requestedModel: options.sessionOptions?.model,
         models: sessionModels,
+        configOptions: resumedSession.configOptions,
         agentCommand: options.agentCommand,
         timeoutMs: options.timeoutMs,
       }),
