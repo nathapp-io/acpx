@@ -29,7 +29,10 @@ export {
 export type {
   AcpAgentRegistry,
   AcpFileSessionStoreOptions,
+  AcpPermissionDecision,
+  AcpPermissionRequest,
   AcpRuntime,
+  AcpRuntimeAvailableCommand,
   AcpRuntimeCapabilities,
   AcpRuntimeDoctorReport,
   AcpRuntimeEnsureInput,
@@ -38,15 +41,21 @@ export type {
   AcpRuntimeOptions,
   AcpRuntimePromptMode,
   AcpRuntimeSessionMode,
+  AcpRuntimeSessionModels,
+  AcpRuntimeSessionUsage,
   AcpRuntimeStatus,
   AcpRuntimeTurn,
   AcpRuntimeTurnAttachment,
   AcpRuntimeTurnInput,
   AcpRuntimeTurnResult,
   AcpRuntimeTurnResultError,
+  AcpRuntimeUsageBreakdown,
+  AcpRuntimeUsageCost,
   AcpSessionRecord,
   AcpSessionStore,
   AcpSessionUpdateTag,
+  SessionAgentOptions,
+  SystemPromptOption,
 } from "./runtime/public/contract.js";
 
 export const ACPX_BACKEND_ID = "acpx";
@@ -128,6 +137,7 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       mode: input.mode,
       cwd: input.cwd ?? this.options.cwd,
       resumeSessionId: input.resumeSessionId,
+      sessionOptions: input.sessionOptions,
     });
 
     const handle: AcpRuntimeHandle = {
@@ -201,8 +211,29 @@ export class AcpxRuntime implements AcpxRuntimeLike {
     });
   }
 
-  getCapabilities(_input?: { handle?: AcpRuntimeHandle }): AcpRuntimeCapabilities {
-    return ACPX_CAPABILITIES;
+  async getCapabilities(input?: { handle?: AcpRuntimeHandle }): Promise<AcpRuntimeCapabilities> {
+    if (!input?.handle) {
+      return ACPX_CAPABILITIES;
+    }
+
+    const { handle } = this.resolveManagerHandle(input.handle);
+    const record = await this.options.sessionStore.load(handle.acpxRecordId ?? handle.sessionKey);
+    if (!record?.acpx?.config_options) {
+      return ACPX_CAPABILITIES;
+    }
+
+    const configOptionKeys = Array.from(
+      new Set(
+        record.acpx.config_options
+          .map((option) => option.id)
+          .filter((id): id is string => typeof id === "string" && id.trim().length > 0),
+      ),
+    );
+
+    return {
+      ...ACPX_CAPABILITIES,
+      ...(configOptionKeys.length > 0 ? { configOptionKeys } : {}),
+    };
   }
 
   async getStatus(input: {

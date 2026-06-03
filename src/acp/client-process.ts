@@ -94,40 +94,10 @@ export function splitCommandLine(value: string): CommandParts {
   let escaping = false;
 
   for (const ch of value) {
-    if (escaping) {
-      current += ch;
-      escaping = false;
-      continue;
-    }
-
-    if (ch === "\\" && quote !== "'") {
-      escaping = true;
-      continue;
-    }
-
-    if (quote) {
-      if (ch === quote) {
-        quote = null;
-      } else {
-        current += ch;
-      }
-      continue;
-    }
-
-    if (ch === "'" || ch === '"') {
-      quote = ch;
-      continue;
-    }
-
-    if (/\s/.test(ch)) {
-      if (current.length > 0) {
-        parts.push(current);
-        current = "";
-      }
-      continue;
-    }
-
-    current += ch;
+    const next = readCommandLineChar({ ch, current, quote, escaping, parts });
+    current = next.current;
+    quote = next.quote;
+    escaping = next.escaping;
   }
 
   if (escaping) {
@@ -150,6 +120,61 @@ export function splitCommandLine(value: string): CommandParts {
     command: parts[0],
     args: parts.slice(1),
   };
+}
+
+function readCommandLineChar(state: {
+  ch: string;
+  current: string;
+  quote: "'" | '"' | null;
+  escaping: boolean;
+  parts: string[];
+}): { current: string; quote: "'" | '"' | null; escaping: boolean } {
+  if (state.escaping) {
+    return { current: state.current + state.ch, quote: state.quote, escaping: false };
+  }
+  if (state.ch === "\\" && state.quote !== "'") {
+    return { current: state.current, quote: state.quote, escaping: true };
+  }
+  if (state.quote) {
+    return readQuotedCommandLineChar({
+      ch: state.ch,
+      current: state.current,
+      quote: state.quote,
+    });
+  }
+  return readUnquotedCommandLineChar(state);
+}
+
+function readQuotedCommandLineChar(state: { ch: string; current: string; quote: "'" | '"' }): {
+  current: string;
+  quote: "'" | '"' | null;
+  escaping: boolean;
+} {
+  if (state.ch === state.quote) {
+    return { current: state.current, quote: null, escaping: false };
+  }
+  return { current: state.current + state.ch, quote: state.quote, escaping: false };
+}
+
+function readUnquotedCommandLineChar(state: { ch: string; current: string; parts: string[] }): {
+  current: string;
+  quote: "'" | '"' | null;
+  escaping: boolean;
+} {
+  if (state.ch === "'" || state.ch === '"') {
+    return { current: state.current, quote: state.ch, escaping: false };
+  }
+  if (/\s/.test(state.ch)) {
+    flushCommandLinePart(state.parts, state.current);
+    return { current: "", quote: null, escaping: false };
+  }
+  return { current: state.current + state.ch, quote: null, escaping: false };
+}
+
+function flushCommandLinePart(parts: string[], current: string): void {
+  if (current.length > 0) {
+    parts.push(current);
+  }
 }
 
 export function asAbsoluteCwd(cwd: string): string {
@@ -199,9 +224,11 @@ function isWsl(options: ResolveSessionCwdOptions): boolean {
   return existsSync("/proc/sys/fs/binfmt_misc/WSLInterop");
 }
 
+const WINDOWS_EXECUTABLE_EXTENSION_RE = /\.(?:exe|cmd|bat)$/u;
+
 function isWindowsExecutableCommand(command: string): boolean {
-  const normalized = command.replace(/\\/g, "/").toLowerCase();
-  return normalized.endsWith(".exe") || normalized.startsWith("/mnt/c/");
+  const normalized = command.toLowerCase();
+  return WINDOWS_EXECUTABLE_EXTENSION_RE.test(normalized);
 }
 
 async function runWslpath(cwd: string): Promise<string> {

@@ -1,9 +1,17 @@
+import type { ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
 import type {
+  AcpPermissionDecision,
+  AcpPermissionRequest,
   McpServer,
   NonInteractivePermissionPolicy,
   PermissionMode,
   SessionRecord,
 } from "../../types.js";
+import type { SessionAgentOptions } from "../engine/session-options.js";
+
+export type { SessionAgentOptions, SystemPromptOption } from "../engine/session-options.js";
+
+export type { AcpPermissionDecision, AcpPermissionRequest } from "../../types.js";
 
 export type AcpRuntimePromptMode = "prompt" | "steer";
 
@@ -40,9 +48,22 @@ export type AcpRuntimeEnsureInput = {
   mode: AcpRuntimeSessionMode;
   resumeSessionId?: string;
   cwd?: string;
+  /**
+   * Per-session agent options applied when a fresh ACP session is created.
+   * Threaded into `_meta.systemPrompt` (and `_meta.claudeCode.options.*`)
+   * on the underlying `session/new` request, and persisted onto the new
+   * record. Ignored when an existing persistent session is reused — system
+   * prompts are fixed at `newSession` time, so changing them requires a
+   * different sessionKey or closing the prior record first.
+   */
+  sessionOptions?: SessionAgentOptions;
 };
 
 export type AcpRuntimeTurnAttachment = {
+  /**
+   * Media type for binary prompt attachments. The runtime currently maps
+   * image/* and audio/* attachments to ACP prompt content blocks.
+   */
   mediaType: string;
   data: string;
 };
@@ -62,11 +83,77 @@ export type AcpRuntimeCapabilities = {
   configOptionKeys?: string[];
 };
 
+export type AcpRuntimeSessionModels = {
+  currentModelId?: string;
+  availableModelIds: string[];
+};
+
+/**
+ * Cumulative session cost as reported by the agent. Mirrors ACP's
+ * `Cost`, but both fields are optional here because not every adapter
+ * populates them on every event.
+ */
+export type AcpRuntimeUsageCost = {
+  amount?: number;
+  currency?: string;
+};
+
+/**
+ * Per-turn token breakdown. Sourced from `UsageUpdate._meta.usage` on
+ * adapters that populate it (Claude Code today; Codex and others may
+ * omit it). All fields optional — consumers should treat missing
+ * fields as "unknown", not "zero".
+ */
+export type AcpRuntimeUsageBreakdown = {
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedReadTokens?: number;
+  cachedWriteTokens?: number;
+  thoughtTokens?: number;
+  totalTokens?: number;
+};
+
+/**
+ * Agent-advertised slash command. The runtime only surfaces enough to
+ * drive a picker UI ("does the agent advertise /compact?"). The full
+ * `AvailableCommandInput` schema from ACP is intentionally not plumbed
+ * through.
+ */
+export type AcpRuntimeAvailableCommand = {
+  name: string;
+  description?: string;
+  /** True/false when ACP advertised whether this command has an input schema. */
+  hasInput?: boolean;
+};
+
+/**
+ * Session-level usage roll-up surfaced through `getStatus()`. The
+ * reducer persists the breakdowns onto the session record; this type
+ * exposes them on the runtime contract.
+ */
+export type AcpRuntimeSessionUsage = {
+  cumulative?: AcpRuntimeUsageBreakdown;
+  /** Cumulative session cost when the agent reported it. */
+  cost?: AcpRuntimeUsageCost;
+  /** Keyed by user-message id, matching the persisted reducer state. */
+  perRequest?: Record<string, AcpRuntimeUsageBreakdown>;
+};
+
 export type AcpRuntimeStatus = {
   summary?: string;
   acpxRecordId?: string;
   backendSessionId?: string;
   agentSessionId?: string;
+  models?: AcpRuntimeSessionModels;
+  /** Token usage and cost from the persisted session record. */
+  usage?: AcpRuntimeSessionUsage;
+  /**
+   * Commands the agent advertised via `available_commands_update`.
+   * Sourced from the persisted record — older session files only
+   * preserve `name`, so `description` and `hasInput` may be undefined
+   * even when a more recent live event would have carried both.
+   */
+  availableCommands?: AcpRuntimeAvailableCommand[];
   details?: Record<string, unknown>;
 };
 
@@ -91,6 +178,21 @@ export type AcpRuntimeEvent =
       tag?: AcpSessionUpdateTag;
       used?: number;
       size?: number;
+      /** Populated on `usage_update` events when the agent reported a cost. */
+      cost?: AcpRuntimeUsageCost;
+      /**
+       * Populated on `usage_update` events when the agent attached a
+       * per-turn breakdown via `_meta.usage` (Claude Code does this; not
+       * every adapter does).
+       */
+      breakdown?: AcpRuntimeUsageBreakdown;
+      /**
+       * Populated on `available_commands_update` events. The list is a
+       * normalized view of the wire payload — names, descriptions, and
+       * a `hasInput` flag derived from whether the agent advertised a
+       * non-null `input` schema.
+       */
+      availableCommands?: AcpRuntimeAvailableCommand[];
     }
   | {
       type: "tool_call";
@@ -99,6 +201,11 @@ export type AcpRuntimeEvent =
       toolCallId?: string;
       status?: string;
       title?: string;
+      kind?: ToolKind;
+      locations?: ToolCallLocation[];
+      rawInput?: unknown;
+      rawOutput?: unknown;
+      content?: ToolCallContent[];
     }
   /**
    * Compatibility terminal event emitted by runTurn(...). startTurn(...).events
@@ -116,12 +223,14 @@ export type AcpRuntimeEvent =
       type: "error";
       message: string;
       code?: string;
+      detailCode?: string;
       retryable?: boolean;
     };
 
 export type AcpRuntimeTurnResultError = {
   message: string;
   code?: string;
+  detailCode?: string;
   retryable?: boolean;
 };
 
@@ -193,6 +302,10 @@ export type AcpRuntimeOptions = {
   timeoutMs?: number;
   probeAgent?: string;
   verbose?: boolean;
+  onPermissionRequest?: (
+    req: AcpPermissionRequest,
+    ctx: { signal: AbortSignal },
+  ) => Promise<AcpPermissionDecision | undefined>;
 };
 
 export type AcpFileSessionStoreOptions = {

@@ -122,12 +122,15 @@ test("conversation model captures prompt, chunks, tool calls, and metadata", () 
         sessionUpdate: "usage_update",
         used: 100,
         size: 1000,
+        cost: { amount: 0.051, currency: "USD" },
         _meta: {
           usage: {
             inputTokens: 60,
             outputTokens: 40,
             cachedWriteTokens: 10,
             cachedReadTokens: 15,
+            thoughtTokens: 5,
+            totalTokens: 120,
           },
         },
       },
@@ -176,16 +179,54 @@ test("conversation model captures prompt, chunks, tool calls, and metadata", () 
     output_tokens: 40,
     cache_creation_input_tokens: 10,
     cache_read_input_tokens: 15,
+    thought_tokens: 5,
+    total_tokens: 120,
   });
   assert.deepEqual(conversation.cumulative_token_usage, {
     input_tokens: 60,
     output_tokens: 40,
     cache_creation_input_tokens: 10,
     cache_read_input_tokens: 15,
+    thought_tokens: 5,
+    total_tokens: 120,
   });
+  assert.deepEqual(conversation.cumulative_cost, { amount: 0.051, currency: "USD" });
 
   assert.equal(acpxState?.current_mode_id, "code");
-  assert.deepEqual(acpxState?.available_commands, ["create_plan"]);
+  assert.deepEqual(acpxState?.available_commands, [
+    { name: "create_plan", description: "create plan", has_input: false },
+  ]);
+});
+
+test("recordPromptSubmission preserves audio prompt content", () => {
+  const conversation = createSessionConversation("2026-02-27T10:00:00.000Z");
+
+  const messageId = recordPromptSubmission(
+    conversation,
+    [
+      { type: "text", text: "transcribe" },
+      { type: "audio", mimeType: "audio/wav", data: "UklGRg==" },
+    ],
+    "2026-02-27T10:00:01.000Z",
+  );
+
+  assert.equal(typeof messageId, "string");
+  assert.deepEqual(conversation.messages, [
+    {
+      User: {
+        id: messageId,
+        content: [
+          { Text: "transcribe" },
+          {
+            Audio: {
+              source: "UklGRg==",
+              mime_type: "audio/wav",
+            },
+          },
+        ],
+      },
+    },
+  ]);
 });
 
 test("recordClientOperation keeps state and advances timestamp", () => {
@@ -213,7 +254,7 @@ test("cloneSessionAcpxState preserves desired mode id", () => {
     desired_config_options: {
       reasoning_effort: "high",
     },
-    available_commands: ["review"],
+    available_commands: [{ name: "review", description: "Review changes", has_input: true }],
     session_options: {
       model: "sonnet",
       allowed_tools: ["Read", "Grep"],
@@ -226,7 +267,9 @@ test("cloneSessionAcpxState preserves desired mode id", () => {
   assert.deepEqual(cloned?.desired_config_options, {
     reasoning_effort: "high",
   });
-  assert.deepEqual(cloned?.available_commands, ["review"]);
+  assert.deepEqual(cloned?.available_commands, [
+    { name: "review", description: "Review changes", has_input: true },
+  ]);
   assert.deepEqual(cloned?.session_options, {
     model: "sonnet",
     allowed_tools: ["Read", "Grep"],

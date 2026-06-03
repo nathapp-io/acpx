@@ -56,7 +56,7 @@ The following are usually out of scope for this repository:
 If the issue is actually in an upstream tool, please report it to that project. Examples include:
 
 - OpenClaw bridge issues: [openclaw/openclaw](https://github.com/openclaw/openclaw)
-- Codex ACP adapter issues: [zed-industries/codex-acp](https://github.com/zed-industries/codex-acp)
+- Codex ACP adapter issues: [agentclientprotocol/codex-acp](https://github.com/agentclientprotocol/codex-acp)
 - Gemini CLI issues: [google/gemini-cli](https://github.com/google/gemini-cli)
 
 ## Trust Boundaries
@@ -80,7 +80,7 @@ If an attacker can already modify those files or the commands that `acpx` launch
 
 ## Runtime Requirements
 
-`acpx` requires **Node.js 22.12.0 or later**.
+`acpx` requires **Node.js 22.13.0 or later**.
 
 Verify your version with:
 

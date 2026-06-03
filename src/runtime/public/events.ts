@@ -1,5 +1,14 @@
-import type { AcpRuntimeEvent, AcpSessionUpdateTag } from "./contract.js";
+import type { ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
+import type {
+  AcpRuntimeAvailableCommand,
+  AcpRuntimeEvent,
+  AcpRuntimeUsageBreakdown,
+  AcpRuntimeUsageCost,
+  AcpSessionUpdateTag,
+} from "./contract.js";
 import { asOptionalString, asString, asTrimmedString, isRecord } from "./shared.js";
+
+const TOOL_OUTPUT_SUMMARY_MAX_CHARS = 500;
 
 function safeParseJsonObject(line: string): Record<string, unknown> | null {
   try {
@@ -55,46 +64,56 @@ function resolveStatusTextForTag(params: {
   tag: AcpSessionUpdateTag;
   payload: Record<string, unknown>;
 }): string | null {
-  const { tag, payload } = params;
-  if (tag === "available_commands_update") {
-    const commands = Array.isArray(payload.availableCommands) ? payload.availableCommands : [];
-    return commands.length > 0
-      ? `available commands updated (${commands.length})`
-      : "available commands updated";
+  const resolver = STATUS_TEXT_RESOLVERS[params.tag];
+  return resolver ? resolver(params.payload) : null;
+}
+
+type StatusTextResolver = (payload: Record<string, unknown>) => string | null;
+
+const STATUS_TEXT_RESOLVERS: Partial<Record<AcpSessionUpdateTag, StatusTextResolver>> = {
+  available_commands_update: availableCommandsStatusText,
+  current_mode_update: currentModeStatusText,
+  config_option_update: configOptionStatusText,
+  session_info_update: sessionInfoStatusText,
+  plan: planStatusText,
+};
+
+function availableCommandsStatusText(payload: Record<string, unknown>): string {
+  const commands = Array.isArray(payload.availableCommands) ? payload.availableCommands : [];
+  return commands.length > 0
+    ? `available commands updated (${commands.length})`
+    : "available commands updated";
+}
+
+function currentModeStatusText(payload: Record<string, unknown>): string {
+  const mode =
+    asTrimmedString(payload.currentModeId) ||
+    asTrimmedString(payload.modeId) ||
+    asTrimmedString(payload.mode);
+  return mode ? `mode updated: ${mode}` : "mode updated";
+}
+
+function configOptionStatusText(payload: Record<string, unknown>): string {
+  const id = asTrimmedString(payload.id) || asTrimmedString(payload.configOptionId);
+  const value =
+    asTrimmedString(payload.currentValue) ||
+    asTrimmedString(payload.value) ||
+    asTrimmedString(payload.optionValue);
+  if (id && value) {
+    return `config updated: ${id}=${value}`;
   }
-  if (tag === "current_mode_update") {
-    const mode =
-      asTrimmedString(payload.currentModeId) ||
-      asTrimmedString(payload.modeId) ||
-      asTrimmedString(payload.mode);
-    return mode ? `mode updated: ${mode}` : "mode updated";
-  }
-  if (tag === "config_option_update") {
-    const id = asTrimmedString(payload.id) || asTrimmedString(payload.configOptionId);
-    const value =
-      asTrimmedString(payload.currentValue) ||
-      asTrimmedString(payload.value) ||
-      asTrimmedString(payload.optionValue);
-    if (id && value) {
-      return `config updated: ${id}=${value}`;
-    }
-    if (id) {
-      return `config updated: ${id}`;
-    }
-    return "config updated";
-  }
-  if (tag === "session_info_update") {
-    return (
-      asTrimmedString(payload.summary) || asTrimmedString(payload.message) || "session updated"
-    );
-  }
-  if (tag === "plan") {
-    const entries = Array.isArray(payload.entries) ? payload.entries : [];
-    const first = entries.find((entry) => isRecord(entry));
-    const content = asTrimmedString(first?.content);
-    return content ? `plan: ${content}` : null;
-  }
-  return null;
+  return id ? `config updated: ${id}` : "config updated";
+}
+
+function sessionInfoStatusText(payload: Record<string, unknown>): string {
+  return asTrimmedString(payload.summary) || asTrimmedString(payload.message) || "session updated";
+}
+
+function planStatusText(payload: Record<string, unknown>): string | null {
+  const entries = Array.isArray(payload.entries) ? payload.entries : [];
+  const first = entries.find((entry) => isRecord(entry));
+  const content = asTrimmedString(first?.content);
+  return content ? `plan: ${content}` : null;
 }
 
 function resolveTextChunk(params: {
@@ -214,6 +233,105 @@ function summarizeToolInput(rawInput: unknown): string | undefined {
   ]);
 }
 
+function truncateToolSummary(value: string): string {
+  if (value.length <= TOOL_OUTPUT_SUMMARY_MAX_CHARS) {
+    return value;
+  }
+  return `${value.slice(0, TOOL_OUTPUT_SUMMARY_MAX_CHARS - 1)}…`;
+}
+
+function readToolContentText(value: unknown): string | undefined {
+  const record = isRecord(value) ? value : undefined;
+  if (!record) {
+    return undefined;
+  }
+  if (record.type === "content") {
+    return readToolContentText(record.content);
+  }
+  const reader = toolContentTextReader(String(record.type));
+  return reader?.(record);
+}
+
+type ToolContentTextReader = (record: Record<string, unknown>) => string | undefined;
+
+const TOOL_CONTENT_TEXT_READERS: Record<string, ToolContentTextReader> = {
+  text: (record) => asString(record.text),
+  audio: (record) => `[audio] ${asOptionalString(record.mimeType) || "audio"}`,
+  resource_link: (record) =>
+    asOptionalString(record.title) || asOptionalString(record.name) || asOptionalString(record.uri),
+  resource: (record) => {
+    const resource = isRecord(record.resource) ? record.resource : undefined;
+    return asString(resource?.text) || asOptionalString(resource?.uri);
+  },
+  diff: (record) => `diff ${asOptionalString(record.path) || "file"}`,
+  terminal: (record) => {
+    const terminalId = asOptionalString(record.terminalId) || asOptionalString(record.id);
+    return terminalId ? `[terminal] ${terminalId}` : "[terminal]";
+  },
+};
+
+function toolContentTextReader(type: string): ToolContentTextReader | undefined {
+  return Object.hasOwn(TOOL_CONTENT_TEXT_READERS, type)
+    ? TOOL_CONTENT_TEXT_READERS[type]
+    : undefined;
+}
+
+function summarizeToolContent(content: unknown): string | undefined {
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  const fragments = content
+    .map((entry) => readToolContentText(entry)?.trim())
+    .filter((entry): entry is string => Boolean(entry));
+  if (fragments.length === 0) {
+    return undefined;
+  }
+  return truncateToolSummary([...new Set(fragments)].join("\n"));
+}
+
+function summarizeToolOutput(rawOutput: unknown): string | undefined {
+  if (rawOutput == null) {
+    return undefined;
+  }
+  if (isScalarToolOutput(rawOutput)) {
+    return truncateToolSummary(String(rawOutput));
+  }
+  const record = isRecord(rawOutput) ? rawOutput : undefined;
+  if (!record) {
+    return undefined;
+  }
+  return (
+    truncateToolSummary(
+      readFirstString(record, ["text", "message", "error", "stdout", "stderr", "content"]) ?? "",
+    ) || undefined
+  );
+}
+
+function isScalarToolOutput(value: unknown): value is string | number | boolean {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function shouldForwardArray(value: unknown): boolean {
+  return Array.isArray(value);
+}
+
+function readToolKind(value: unknown): ToolKind | undefined {
+  const kind = asOptionalString(value);
+  return kind && TOOL_KINDS.has(kind) ? (kind as ToolKind) : undefined;
+}
+
+const TOOL_KINDS = new Set([
+  "read",
+  "edit",
+  "delete",
+  "move",
+  "search",
+  "execute",
+  "fetch",
+  "think",
+  "other",
+]);
+
 function createToolCallEvent(params: {
   payload: Record<string, unknown>;
   tag: AcpSessionUpdateTag;
@@ -221,16 +339,61 @@ function createToolCallEvent(params: {
   const title = asTrimmedString(params.payload.title) || "tool call";
   const status = asTrimmedString(params.payload.status);
   const inputSummary = summarizeToolInput(params.payload.rawInput);
+  const outputSummary =
+    summarizeToolContent(params.payload.content) ?? summarizeToolOutput(params.payload.rawOutput);
   const toolCallId = asOptionalString(params.payload.toolCallId);
+  const kind = readToolKind(params.payload.kind);
   const summaryText = status ? `${title} (${status})` : title;
-  return {
+  const detailSummary =
+    params.tag === "tool_call_update"
+      ? (outputSummary ?? inputSummary)
+      : (inputSummary ?? outputSummary);
+  const event: AcpRuntimeEvent = {
     type: "tool_call",
-    text: inputSummary ? `${summaryText}: ${inputSummary}` : summaryText,
+    text: detailSummary ? `${summaryText}: ${detailSummary}` : summaryText,
     tag: params.tag,
-    ...(toolCallId ? { toolCallId } : {}),
-    ...(status ? { status } : {}),
     title,
   };
+  assignToolCallEventMetadata(event, params.payload, { toolCallId, status, kind });
+  return event;
+}
+
+function assignToolCallEventMetadata(
+  event: AcpRuntimeEvent,
+  payload: Record<string, unknown>,
+  values: { toolCallId?: string; status?: string; kind?: ToolKind },
+): void {
+  if (event.type !== "tool_call") {
+    return;
+  }
+  if (values.toolCallId) {
+    event.toolCallId = values.toolCallId;
+  }
+  if (values.status) {
+    event.status = values.status;
+  }
+  if (values.kind) {
+    event.kind = values.kind;
+  }
+  assignForwardedToolPayload(event, payload);
+}
+
+function assignForwardedToolPayload(
+  event: Extract<AcpRuntimeEvent, { type: "tool_call" }>,
+  payload: Record<string, unknown>,
+): void {
+  if (shouldForwardArray(payload.locations)) {
+    event.locations = payload.locations as ToolCallLocation[];
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "rawInput")) {
+    event.rawInput = payload.rawInput;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "rawOutput")) {
+    event.rawOutput = payload.rawOutput;
+  }
+  if (shouldForwardArray(payload.content)) {
+    event.content = payload.content as ToolCallContent[];
+  }
 }
 
 export function parsePromptEventLine(line: string): AcpRuntimeEvent | null {
@@ -250,94 +413,184 @@ export function parsePromptEventLine(line: string): AcpRuntimeEvent | null {
   const type = structured.type;
   const payload = structured.payload;
   const tag = structured.tag;
+  const parser = promptEventParser(type);
+  return parser ? parser(payload, tag) : null;
+}
 
-  switch (type) {
-    case "text":
-      return createTextDeltaEvent({
-        content: asString(payload.content),
-        stream: "output",
-        tag,
-      });
-    case "thought":
-      return createTextDeltaEvent({
-        content: asString(payload.content),
-        stream: "thought",
-        tag,
-      });
-    case "tool_call":
-      return createToolCallEvent({
-        payload,
-        tag: tag ?? "tool_call",
-      });
-    case "tool_call_update":
-      return createToolCallEvent({
-        payload,
-        tag: tag ?? "tool_call_update",
-      });
-    case "agent_message_chunk":
-      return resolveTextChunk({
-        payload,
-        stream: "output",
-        tag: "agent_message_chunk",
-      });
-    case "agent_thought_chunk":
-      return resolveTextChunk({
-        payload,
-        stream: "thought",
-        tag: "agent_thought_chunk",
-      });
-    case "usage_update": {
-      const used = asOptionalFiniteNumber(payload.used);
-      const size = asOptionalFiniteNumber(payload.size);
-      const text =
-        used != null && size != null ? `usage updated: ${used}/${size}` : "usage updated";
-      return {
-        type: "status",
-        text,
-        tag: "usage_update",
-        ...(used != null ? { used } : {}),
-        ...(size != null ? { size } : {}),
-      };
+type PromptEventParser = (
+  payload: Record<string, unknown>,
+  tag: AcpSessionUpdateTag | undefined,
+) => AcpRuntimeEvent | null;
+
+const PROMPT_EVENT_PARSERS: Record<string, PromptEventParser> = {
+  text: (payload, tag) =>
+    createTextDeltaEvent({ content: asString(payload.content), stream: "output", tag }),
+  thought: (payload, tag) =>
+    createTextDeltaEvent({ content: asString(payload.content), stream: "thought", tag }),
+  tool_call: (payload, tag) => createToolCallEvent({ payload, tag: tag ?? "tool_call" }),
+  tool_call_update: (payload, tag) =>
+    createToolCallEvent({ payload, tag: tag ?? "tool_call_update" }),
+  agent_message_chunk: (payload) =>
+    resolveTextChunk({ payload, stream: "output", tag: "agent_message_chunk" }),
+  agent_thought_chunk: (payload) =>
+    resolveTextChunk({ payload, stream: "thought", tag: "agent_thought_chunk" }),
+  usage_update: usageUpdateEvent,
+  available_commands_update: availableCommandsUpdateEvent,
+  current_mode_update: (payload) => statusUpdateEvent("current_mode_update", payload),
+  config_option_update: (payload) => statusUpdateEvent("config_option_update", payload),
+  session_info_update: (payload) => statusUpdateEvent("session_info_update", payload),
+  plan: (payload) => statusUpdateEvent("plan", payload),
+  client_operation: clientOperationEvent,
+  update: updateStatusEvent,
+  done: () => null,
+  error: () => null,
+};
+
+function promptEventParser(type: string): PromptEventParser | undefined {
+  return Object.hasOwn(PROMPT_EVENT_PARSERS, type) ? PROMPT_EVENT_PARSERS[type] : undefined;
+}
+
+function usageUpdateEvent(payload: Record<string, unknown>): AcpRuntimeEvent {
+  const used = asOptionalFiniteNumber(payload.used);
+  const size = asOptionalFiniteNumber(payload.size);
+  const meta = isRecord(payload._meta) ? payload._meta : undefined;
+  return buildUsageUpdateEvent({
+    used,
+    size,
+    cost: normalizeUsageCost(payload.cost),
+    breakdown: normalizeUsageBreakdown(meta?.usage),
+  });
+}
+
+function buildUsageUpdateEvent(parts: {
+  used: number | undefined;
+  size: number | undefined;
+  cost: AcpRuntimeUsageCost | undefined;
+  breakdown: AcpRuntimeUsageBreakdown | undefined;
+}): AcpRuntimeEvent {
+  const { used, size, cost, breakdown } = parts;
+  const text = used != null && size != null ? `usage updated: ${used}/${size}` : "usage updated";
+  return {
+    type: "status",
+    text,
+    tag: "usage_update",
+    ...(used != null ? { used } : {}),
+    ...(size != null ? { size } : {}),
+    ...(cost ? { cost } : {}),
+    ...(breakdown ? { breakdown } : {}),
+  };
+}
+
+function availableCommandsUpdateEvent(payload: Record<string, unknown>): AcpRuntimeEvent | null {
+  const raw = Array.isArray(payload.availableCommands) ? payload.availableCommands : [];
+  const availableCommands: AcpRuntimeAvailableCommand[] = [];
+  for (const entry of raw) {
+    if (!isRecord(entry)) {
+      continue;
     }
-    case "available_commands_update":
-    case "current_mode_update":
-    case "config_option_update":
-    case "session_info_update":
-    case "plan": {
-      const text = resolveStatusTextForTag({
-        tag: type as AcpSessionUpdateTag,
-        payload,
-      });
-      if (!text) {
-        return null;
-      }
-      return {
-        type: "status",
-        text,
-        tag: type as AcpSessionUpdateTag,
-      };
+    const name = asTrimmedString(entry.name);
+    if (!name) {
+      continue;
     }
-    case "client_operation": {
-      const method = asTrimmedString(payload.method) || "operation";
-      const status = asTrimmedString(payload.status);
-      const summary = asTrimmedString(payload.summary);
-      const text = [method, status, summary].filter(Boolean).join(" ");
-      if (!text) {
-        return null;
-      }
-      return { type: "status", text, ...(tag ? { tag } : {}) };
-    }
-    case "update": {
-      const update = asTrimmedString(payload.update);
-      if (!update) {
-        return null;
-      }
-      return { type: "status", text: update, ...(tag ? { tag } : {}) };
-    }
-    case "done":
-    case "error":
-      return null;
-    default:
-      return null;
+    const description = asTrimmedString(entry.description);
+    availableCommands.push({
+      name,
+      ...(description ? { description } : {}),
+      hasInput: entry.input != null,
+    });
   }
+  const text =
+    availableCommands.length > 0
+      ? `available commands updated (${availableCommands.length})`
+      : "available commands updated";
+  return {
+    type: "status",
+    text,
+    tag: "available_commands_update",
+    availableCommands,
+  };
+}
+
+function normalizeUsageCost(value: unknown): AcpRuntimeUsageCost | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const amount = asOptionalFiniteNumber(value.amount);
+  const currency = asTrimmedString(value.currency);
+  if (amount == null && !currency) {
+    return undefined;
+  }
+  return {
+    ...(amount != null ? { amount } : {}),
+    ...(currency ? { currency } : {}),
+  };
+}
+
+const USAGE_BREAKDOWN_FIELDS: ReadonlyArray<readonly [keyof AcpRuntimeUsageBreakdown, string[]]> = [
+  ["inputTokens", ["inputTokens", "input_tokens"]],
+  ["outputTokens", ["outputTokens", "output_tokens"]],
+  ["cachedReadTokens", ["cachedReadTokens", "cacheReadInputTokens", "cache_read_input_tokens"]],
+  [
+    "cachedWriteTokens",
+    ["cachedWriteTokens", "cacheCreationInputTokens", "cache_creation_input_tokens"],
+  ],
+  ["thoughtTokens", ["thoughtTokens", "thought_tokens"]],
+  ["totalTokens", ["totalTokens", "total_tokens"]],
+];
+
+function normalizeUsageBreakdown(value: unknown): AcpRuntimeUsageBreakdown | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const breakdown: AcpRuntimeUsageBreakdown = {};
+  for (const [key, aliases] of USAGE_BREAKDOWN_FIELDS) {
+    const v = firstFiniteNumber(value, aliases);
+    if (v != null) {
+      breakdown[key] = v;
+    }
+  }
+  return Object.keys(breakdown).length > 0 ? breakdown : undefined;
+}
+
+function firstFiniteNumber(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): number | undefined {
+  for (const key of keys) {
+    const value = asOptionalFiniteNumber(record[key]);
+    if (value != null) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function statusUpdateEvent(
+  tag: AcpSessionUpdateTag,
+  payload: Record<string, unknown>,
+): AcpRuntimeEvent | null {
+  const text = resolveStatusTextForTag({ tag, payload });
+  if (!text) {
+    return null;
+  }
+  return { type: "status", text, tag };
+}
+
+function clientOperationEvent(
+  payload: Record<string, unknown>,
+  tag: AcpSessionUpdateTag | undefined,
+): AcpRuntimeEvent | null {
+  const method = asTrimmedString(payload.method) || "operation";
+  const status = asTrimmedString(payload.status);
+  const summary = asTrimmedString(payload.summary);
+  const text = [method, status, summary].filter(Boolean).join(" ");
+  return text ? { type: "status", text, ...(tag ? { tag } : {}) } : null;
+}
+
+function updateStatusEvent(
+  payload: Record<string, unknown>,
+  tag: AcpSessionUpdateTag | undefined,
+): AcpRuntimeEvent | null {
+  const update = asTrimmedString(payload.update);
+  return update ? { type: "status", text: update, ...(tag ? { tag } : {}) } : null;
 }

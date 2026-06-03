@@ -2,13 +2,29 @@ import type {
   AgentCapabilities,
   AnyMessage,
   McpServer,
+  RequestPermissionRequest,
   SessionNotification,
   SessionConfigOption,
+  SessionInfo,
   SetSessionConfigOptionResponse,
   StopReason,
+  ToolKind,
 } from "@agentclientprotocol/sdk";
 export type { McpServer, SessionNotification } from "@agentclientprotocol/sdk";
 import type { PromptInput } from "./prompt-content.js";
+
+export type AcpPermissionRequest = {
+  sessionId: string;
+  raw: RequestPermissionRequest;
+  inferredKind: ToolKind | undefined;
+};
+
+export type AcpPermissionDecision =
+  | { outcome: "allow_once" }
+  | { outcome: "allow_always" }
+  | { outcome: "reject_once" }
+  | { outcome: "reject_always" }
+  | { outcome: "cancel" };
 
 export const EXIT_CODES = {
   SUCCESS: 0,
@@ -33,6 +49,30 @@ export type AuthPolicy = (typeof AUTH_POLICIES)[number];
 
 export const NON_INTERACTIVE_PERMISSION_POLICIES = ["deny", "fail"] as const;
 export type NonInteractivePermissionPolicy = (typeof NON_INTERACTIVE_PERMISSION_POLICIES)[number];
+
+export const PERMISSION_POLICY_ACTIONS = ["approve", "deny", "escalate"] as const;
+export type PermissionPolicyAction = (typeof PERMISSION_POLICY_ACTIONS)[number];
+
+export type PermissionPolicy = {
+  autoApprove?: string[];
+  autoDeny?: string[];
+  escalate?: string[];
+  defaultAction?: PermissionPolicyAction;
+};
+
+export type PermissionEscalationEvent = {
+  type: "permission_escalation";
+  sessionId: string;
+  toolCallId: string;
+  toolName?: string;
+  toolTitle: string;
+  toolInput?: unknown;
+  toolKind?: ToolKind;
+  action: "escalate";
+  matchedRule?: string;
+  message: string;
+  timestamp: string;
+};
 
 export const SESSION_RESUME_POLICIES = ["allow-new", "same-session-only"] as const;
 export type SessionResumePolicy = (typeof SESSION_RESUME_POLICIES)[number];
@@ -156,6 +196,7 @@ export interface OutputFormatter {
     acp?: OutputErrorAcpPayload;
     timestamp?: string;
   }): void;
+  onPermissionEscalation(event: PermissionEscalationEvent): void;
   flush(): void;
 }
 
@@ -165,6 +206,7 @@ export type AcpClientOptions = {
   mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
+  permissionPolicy?: PermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   terminal?: boolean;
@@ -180,6 +222,11 @@ export type AcpClientOptions = {
   onAcpOutputMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   onSessionUpdate?: (notification: SessionNotification) => void;
   onClientOperation?: (operation: ClientOperation) => void;
+  onPermissionEscalation?: (event: PermissionEscalationEvent) => void;
+  onPermissionRequest?: (
+    req: AcpPermissionRequest,
+    ctx: { signal: AbortSignal },
+  ) => Promise<AcpPermissionDecision | undefined>;
 };
 
 export const SESSION_RECORD_SCHEMA = "acpx.session.v1" as const;
@@ -189,6 +236,11 @@ export type SessionMessageImage = {
     width: number;
     height: number;
   } | null;
+};
+
+export type SessionMessageAudio = {
+  source: string;
+  mime_type: string;
 };
 
 export type SessionUserContent =
@@ -203,6 +255,9 @@ export type SessionUserContent =
     }
   | {
       Image: SessionMessageImage;
+    }
+  | {
+      Audio: SessionMessageAudio;
     };
 
 export type SessionToolUse = {
@@ -272,6 +327,19 @@ export type SessionTokenUsage = {
   output_tokens?: number;
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
+  thought_tokens?: number;
+  total_tokens?: number;
+};
+
+export type SessionUsageCost = {
+  amount?: number;
+  currency?: string;
+};
+
+export type SessionAvailableCommand = {
+  name: string;
+  description?: string;
+  has_input?: boolean;
 };
 
 export type SessionConversation = {
@@ -279,6 +347,7 @@ export type SessionConversation = {
   messages: SessionMessage[];
   updated_at: string;
   cumulative_token_usage: SessionTokenUsage;
+  cumulative_cost?: SessionUsageCost;
   request_token_usage: Record<string, SessionTokenUsage>;
 };
 
@@ -289,7 +358,7 @@ export type SessionAcpxState = {
   desired_config_options?: Record<string, string>;
   current_model_id?: string;
   available_models?: string[];
-  available_commands?: string[];
+  available_commands?: SessionAvailableCommand[];
   config_options?: SessionConfigOption[];
   session_options?: {
     model?: string;
@@ -297,6 +366,13 @@ export type SessionAcpxState = {
     max_turns?: number;
     system_prompt?: string | { append: string };
   };
+};
+
+export type SessionImportedFrom = {
+  recordId: string;
+  cwdOriginal: string;
+  exportedBy: string;
+  exportedAt: string;
 };
 
 export type SessionRecord = {
@@ -327,8 +403,10 @@ export type SessionRecord = {
   messages: SessionMessage[];
   updated_at: string;
   cumulative_token_usage: SessionTokenUsage;
+  cumulative_cost?: SessionUsageCost;
   request_token_usage: Record<string, SessionTokenUsage>;
   acpx?: SessionAcpxState;
+  importedFrom?: SessionImportedFrom;
 };
 
 export type RunPromptResult = {
@@ -365,6 +443,17 @@ export type SessionSetModelResult = {
 export type SessionEnsureResult = {
   record: SessionRecord;
   created: boolean;
+};
+
+export type AgentSessionListResult = {
+  _meta?: {
+    [key: string]: unknown;
+  } | null;
+  source: "agent";
+  sessions: SessionInfo[];
+  cursor?: string;
+  cwd?: string;
+  nextCursor?: string | null;
 };
 
 export type SessionEnqueueResult = {

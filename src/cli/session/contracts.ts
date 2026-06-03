@@ -9,8 +9,11 @@ import type {
   NonInteractivePermissionPolicy,
   OutputErrorEmissionPolicy,
   OutputFormatter,
+  PermissionEscalationEvent,
   PermissionMode,
+  PermissionPolicy,
   PromptInput,
+  AgentSessionListResult,
   SessionNotification,
   SessionResumePolicy,
   SessionRecord,
@@ -42,6 +45,7 @@ export type RunOnceOptions = {
   mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
+  permissionPolicy?: PermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   terminal?: boolean;
@@ -49,6 +53,7 @@ export type RunOnceOptions = {
   onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   onSessionUpdate?: (notification: SessionNotification) => void;
   onClientOperation?: (operation: ClientOperation) => void;
+  onPermissionEscalation?: (event: PermissionEscalationEvent) => void;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
   sessionOptions?: SessionAgentOptions;
@@ -63,6 +68,7 @@ export type SessionCreateOptions = {
   mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
+  permissionPolicy?: PermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   terminal?: boolean;
@@ -77,6 +83,7 @@ export type SessionSendOptions = {
   mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
+  permissionPolicy?: PermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   terminal?: boolean;
@@ -84,6 +91,7 @@ export type SessionSendOptions = {
   onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
   onSessionUpdate?: (notification: SessionNotification) => void;
   onClientOperation?: (operation: ClientOperation) => void;
+  onPermissionEscalation?: (event: PermissionEscalationEvent) => void;
   errorEmissionPolicy?: OutputErrorEmissionPolicy;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
@@ -103,6 +111,7 @@ export type SessionEnsureOptions = {
   mcpServers?: McpServer[];
   permissionMode: PermissionMode;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
+  permissionPolicy?: PermissionPolicy;
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   terminal?: boolean;
@@ -110,6 +119,23 @@ export type SessionEnsureOptions = {
   walkBoundary?: string;
   sessionOptions?: SessionAgentOptions;
 } & TimedRunOptions;
+
+export type SessionListOptions = {
+  agentCommand: string;
+  cwd: string;
+  cursor?: string;
+  filterCwd?: string;
+  mcpServers?: McpServer[];
+  permissionMode: PermissionMode;
+  nonInteractivePermissions?: NonInteractivePermissionPolicy;
+  permissionPolicy?: PermissionPolicy;
+  authCredentials?: Record<string, string>;
+  authPolicy?: AuthPolicy;
+  terminal?: boolean;
+  verbose?: boolean;
+} & TimedRunOptions;
+
+export type SessionListResult = AgentSessionListResult | undefined;
 
 export type SessionCancelOptions = {
   sessionId: string;

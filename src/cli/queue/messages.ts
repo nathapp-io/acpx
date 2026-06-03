@@ -9,6 +9,8 @@ import {
   type OutputErrorAcpPayload,
   type OutputErrorCode,
   type OutputErrorOrigin,
+  type PermissionEscalationEvent,
+  type PermissionPolicy,
 } from "../../types.js";
 import type {
   AcpJsonRpcMessage,
@@ -30,8 +32,10 @@ export type QueueSubmitRequest = {
   permissionMode: PermissionMode;
   resumePolicy?: SessionResumePolicy;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
+  permissionPolicy?: PermissionPolicy;
   timeoutMs?: number;
   suppressSdkConsoleErrors?: boolean;
+  promptRetries?: number;
   waitForCompletion: boolean;
   sessionOptions?: QueueSessionOptions;
 };
@@ -67,12 +71,20 @@ export type QueueSetConfigOptionRequest = {
   timeoutMs?: number;
 };
 
+export type QueueCloseSessionRequest = {
+  type: "close_session";
+  requestId: string;
+  ownerGeneration?: number;
+  timeoutMs?: number;
+};
+
 export type QueueRequest =
   | QueueSubmitRequest
   | QueueCancelRequest
   | QueueSetModeRequest
   | QueueSetModelRequest
-  | QueueSetConfigOptionRequest;
+  | QueueSetConfigOptionRequest
+  | QueueCloseSessionRequest;
 
 export type QueueOwnerAcceptedMessage = {
   type: "accepted";
@@ -85,6 +97,13 @@ export type QueueOwnerEventMessage = {
   requestId: string;
   ownerGeneration?: number;
   message: AcpJsonRpcMessage;
+};
+
+export type QueueOwnerPermissionEscalationMessage = {
+  type: "permission_escalation";
+  requestId: string;
+  ownerGeneration?: number;
+  event: PermissionEscalationEvent;
 };
 
 export type QueueOwnerResultMessage = {
@@ -122,6 +141,13 @@ export type QueueOwnerSetConfigOptionResultMessage = {
   response: SetSessionConfigOptionResponse;
 };
 
+export type QueueOwnerCloseSessionResultMessage = {
+  type: "close_session_result";
+  requestId: string;
+  ownerGeneration?: number;
+  closed: boolean;
+};
+
 export type QueueOwnerErrorMessage = {
   type: "error";
   requestId: string;
@@ -138,11 +164,13 @@ export type QueueOwnerErrorMessage = {
 export type QueueOwnerMessage =
   | QueueOwnerAcceptedMessage
   | QueueOwnerEventMessage
+  | QueueOwnerPermissionEscalationMessage
   | QueueOwnerResultMessage
   | QueueOwnerCancelResultMessage
   | QueueOwnerSetModeResultMessage
   | QueueOwnerSetModelResultMessage
   | QueueOwnerSetConfigOptionResultMessage
+  | QueueOwnerCloseSessionResultMessage
   | QueueOwnerErrorMessage;
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -164,12 +192,71 @@ function isNonInteractivePermissionPolicy(value: unknown): value is NonInteracti
   return value === "deny" || value === "fail";
 }
 
+function isPermissionPolicy(value: unknown): value is PermissionPolicy {
+  const record = asRecord(value);
+  if (!record) {
+    return false;
+  }
+  return hasValidPermissionRuleLists(record) && hasValidPermissionDefaultAction(record);
+}
+
+function hasValidPermissionRuleLists(record: Record<string, unknown>): boolean {
+  const stringListKeys = ["autoApprove", "autoDeny", "escalate"] as const;
+  for (const key of stringListKeys) {
+    if (!isOptionalStringList(record[key])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isOptionalStringList(value: unknown): boolean {
+  return value == null || (Array.isArray(value) && value.every((item) => typeof item === "string"));
+}
+
+function hasValidPermissionDefaultAction(record: Record<string, unknown>): boolean {
+  return (
+    record.defaultAction == null ||
+    record.defaultAction === "approve" ||
+    record.defaultAction === "deny" ||
+    record.defaultAction === "escalate"
+  );
+}
+
 function isOutputErrorCode(value: unknown): value is OutputErrorCode {
   return typeof value === "string" && OUTPUT_ERROR_CODES.includes(value as OutputErrorCode);
 }
 
 function isOutputErrorOrigin(value: unknown): value is OutputErrorOrigin {
   return typeof value === "string" && OUTPUT_ERROR_ORIGINS.includes(value as OutputErrorOrigin);
+}
+
+function isPermissionEscalationEvent(value: unknown): value is PermissionEscalationEvent {
+  const event = asRecord(value);
+  return (
+    !!event &&
+    hasRequiredPermissionEscalationFields(event) &&
+    hasOptionalStringFields(event, ["toolName", "toolKind", "matchedRule"])
+  );
+}
+
+function hasRequiredPermissionEscalationFields(event: Record<string, unknown>): boolean {
+  return (
+    event.type === "permission_escalation" &&
+    typeof event.sessionId === "string" &&
+    typeof event.toolCallId === "string" &&
+    typeof event.toolTitle === "string" &&
+    event.action === "escalate" &&
+    typeof event.message === "string" &&
+    typeof event.timestamp === "string"
+  );
+}
+
+function hasOptionalStringFields(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
+  return keys.every((key) => record[key] == null || typeof record[key] === "string");
 }
 
 function parseSessionOptions(value: unknown): QueueSessionOptions | null | undefined {
@@ -182,43 +269,69 @@ function parseSessionOptions(value: unknown): QueueSessionOptions | null | undef
   }
 
   const sessionOptions: QueueSessionOptions = {};
-  if (record.model != null) {
-    if (typeof record.model !== "string" || record.model.trim().length === 0) {
-      return null;
-    }
-    sessionOptions.model = record.model;
+  if (!assignSessionModel(sessionOptions, record.model)) {
+    return null;
   }
-  if (record.allowedTools != null) {
-    if (!Array.isArray(record.allowedTools)) {
-      return null;
-    }
-    const allowedTools = record.allowedTools.filter(
-      (tool): tool is string => typeof tool === "string",
-    );
-    if (allowedTools.length !== record.allowedTools.length) {
-      return null;
-    }
-    sessionOptions.allowedTools = allowedTools;
+  if (!assignSessionAllowedTools(sessionOptions, record.allowedTools)) {
+    return null;
   }
-  if (record.maxTurns != null) {
-    if (typeof record.maxTurns !== "number" || !Number.isFinite(record.maxTurns)) {
-      return null;
-    }
-    sessionOptions.maxTurns = Math.max(1, Math.round(record.maxTurns));
+  if (!assignSessionMaxTurns(sessionOptions, record.maxTurns)) {
+    return null;
   }
-  if (record.systemPrompt != null) {
-    if (typeof record.systemPrompt === "string") {
-      sessionOptions.systemPrompt = record.systemPrompt;
-    } else {
-      const systemPrompt = asRecord(record.systemPrompt);
-      if (!systemPrompt || typeof systemPrompt.append !== "string") {
-        return null;
-      }
-      sessionOptions.systemPrompt = { append: systemPrompt.append };
-    }
+  if (!assignSessionSystemPrompt(sessionOptions, record.systemPrompt)) {
+    return null;
   }
 
   return sessionOptions;
+}
+
+function assignSessionModel(options: QueueSessionOptions, value: unknown): boolean {
+  if (value == null) {
+    return true;
+  }
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return false;
+  }
+  options.model = value;
+  return true;
+}
+
+function assignSessionAllowedTools(options: QueueSessionOptions, value: unknown): boolean {
+  if (value == null) {
+    return true;
+  }
+  if (!Array.isArray(value) || value.some((tool) => typeof tool !== "string")) {
+    return false;
+  }
+  options.allowedTools = value;
+  return true;
+}
+
+function assignSessionMaxTurns(options: QueueSessionOptions, value: unknown): boolean {
+  if (value == null) {
+    return true;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return false;
+  }
+  options.maxTurns = Math.max(1, Math.round(value));
+  return true;
+}
+
+function assignSessionSystemPrompt(options: QueueSessionOptions, value: unknown): boolean {
+  if (value == null) {
+    return true;
+  }
+  if (typeof value === "string") {
+    options.systemPrompt = value;
+    return true;
+  }
+  const systemPrompt = asRecord(value);
+  if (!systemPrompt || typeof systemPrompt.append !== "string") {
+    return false;
+  }
+  options.systemPrompt = { append: systemPrompt.append };
+  return true;
 }
 
 function parseOwnerGeneration(value: unknown): number | undefined | null {
@@ -231,145 +344,208 @@ function parseOwnerGeneration(value: unknown): number | undefined | null {
   return value;
 }
 
+function parseNonNegativeInteger(value: unknown): number | undefined | null {
+  if (value == null) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+  return Math.round(value);
+}
+
 export function parseQueueRequest(raw: unknown): QueueRequest | null {
   const request = asRecord(raw);
-  if (!request) {
+  if (!request || typeof request.type !== "string" || typeof request.requestId !== "string") {
     return null;
   }
 
-  if (typeof request.type !== "string" || typeof request.requestId !== "string") {
-    return null;
-  }
   const ownerGeneration = parseOwnerGeneration(request.ownerGeneration);
   if (ownerGeneration === null) {
     return null;
   }
 
-  const timeoutRaw = request.timeoutMs;
-  const timeoutMs =
-    typeof timeoutRaw === "number" && Number.isFinite(timeoutRaw) && timeoutRaw > 0
-      ? Math.round(timeoutRaw)
-      : undefined;
+  return parseTypedQueueRequest(
+    request,
+    parseQueueRequestContext(request.requestId, ownerGeneration, request.timeoutMs),
+  );
+}
 
-  if (request.type === "submit_prompt") {
-    const resumePolicy =
-      request.resumePolicy == null
-        ? undefined
-        : isSessionResumePolicy(request.resumePolicy)
-          ? request.resumePolicy
-          : null;
-    const nonInteractivePermissions =
-      request.nonInteractivePermissions == null
-        ? undefined
-        : isNonInteractivePermissionPolicy(request.nonInteractivePermissions)
-          ? request.nonInteractivePermissions
-          : null;
-    const suppressSdkConsoleErrors =
-      request.suppressSdkConsoleErrors == null
-        ? undefined
-        : typeof request.suppressSdkConsoleErrors === "boolean"
-          ? request.suppressSdkConsoleErrors
-          : null;
-    const sessionOptions = parseSessionOptions(request.sessionOptions);
+type QueueRequestContext = {
+  requestId: string;
+  ownerGeneration: number | undefined;
+  timeoutMs: number | undefined;
+};
 
-    const prompt =
-      request.prompt == null ? undefined : isPromptInput(request.prompt) ? request.prompt : null;
-    if (
-      typeof request.message !== "string" ||
-      !isPermissionMode(request.permissionMode) ||
-      resumePolicy === null ||
-      prompt === null ||
-      nonInteractivePermissions === null ||
-      suppressSdkConsoleErrors === null ||
-      sessionOptions === null ||
-      typeof request.waitForCompletion !== "boolean"
-    ) {
+function parseQueueRequestContext(
+  requestId: string,
+  ownerGeneration: number | undefined,
+  timeoutRaw: unknown,
+): QueueRequestContext {
+  return {
+    requestId,
+    ownerGeneration,
+    timeoutMs: parsePositiveTimeout(timeoutRaw),
+  };
+}
+
+function parsePositiveTimeout(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  return Math.round(value);
+}
+
+function parseTypedQueueRequest(
+  request: Record<string, unknown>,
+  context: QueueRequestContext,
+): QueueRequest | null {
+  switch (request.type) {
+    case "submit_prompt":
+      return parseSubmitRequest(request, context);
+    case "cancel_prompt":
+      return {
+        type: "cancel_prompt",
+        requestId: context.requestId,
+        ownerGeneration: context.ownerGeneration,
+      };
+    case "close_session":
+      return { type: "close_session", ...context };
+    case "set_mode":
+      return parseStringFieldRequest(request, context, "set_mode", "modeId");
+    case "set_model":
+      return parseStringFieldRequest(request, context, "set_model", "modelId");
+    case "set_config_option":
+      return parseSetConfigOptionRequest(request, context);
+    default:
       return null;
-    }
+  }
+}
 
-    return {
-      type: "submit_prompt",
-      requestId: request.requestId,
-      ownerGeneration,
-      message: request.message,
-      prompt: prompt ?? textPrompt(request.message),
-      permissionMode: request.permissionMode,
-      ...(resumePolicy !== undefined ? { resumePolicy } : {}),
-      nonInteractivePermissions,
-      timeoutMs,
-      ...(suppressSdkConsoleErrors !== undefined ? { suppressSdkConsoleErrors } : {}),
-      waitForCompletion: request.waitForCompletion,
-      ...(sessionOptions !== undefined ? { sessionOptions } : {}),
-    };
+function parseSubmitRequest(
+  request: Record<string, unknown>,
+  context: QueueRequestContext,
+): QueueSubmitRequest | null {
+  const parsed = parseSubmitRequestFields(request);
+  if (!parsed) {
+    return null;
   }
 
-  if (request.type === "cancel_prompt") {
-    return {
-      type: "cancel_prompt",
-      requestId: request.requestId,
-      ownerGeneration,
-    };
-  }
+  return {
+    type: "submit_prompt",
+    requestId: context.requestId,
+    ownerGeneration: context.ownerGeneration,
+    message: parsed.message,
+    prompt: parsed.prompt ?? textPrompt(parsed.message),
+    permissionMode: parsed.permissionMode,
+    ...(parsed.resumePolicy !== undefined ? { resumePolicy: parsed.resumePolicy } : {}),
+    nonInteractivePermissions: parsed.nonInteractivePermissions,
+    ...(parsed.permissionPolicy !== undefined ? { permissionPolicy: parsed.permissionPolicy } : {}),
+    timeoutMs: context.timeoutMs,
+    ...(parsed.suppressSdkConsoleErrors !== undefined
+      ? { suppressSdkConsoleErrors: parsed.suppressSdkConsoleErrors }
+      : {}),
+    ...(parsed.promptRetries !== undefined ? { promptRetries: parsed.promptRetries } : {}),
+    waitForCompletion: parsed.waitForCompletion,
+    ...(parsed.sessionOptions !== undefined ? { sessionOptions: parsed.sessionOptions } : {}),
+  };
+}
 
-  if (request.type === "set_mode") {
-    if (typeof request.modeId !== "string" || request.modeId.trim().length === 0) {
-      return null;
-    }
-    return {
-      type: "set_mode",
-      requestId: request.requestId,
-      ownerGeneration,
-      modeId: request.modeId,
-      timeoutMs,
-    };
-  }
+type ParsedSubmitRequestFields = Pick<
+  QueueSubmitRequest,
+  | "message"
+  | "prompt"
+  | "permissionMode"
+  | "resumePolicy"
+  | "nonInteractivePermissions"
+  | "permissionPolicy"
+  | "suppressSdkConsoleErrors"
+  | "promptRetries"
+  | "waitForCompletion"
+  | "sessionOptions"
+>;
 
-  if (request.type === "set_model") {
-    if (typeof request.modelId !== "string" || request.modelId.trim().length === 0) {
-      return null;
-    }
-    return {
-      type: "set_model",
-      requestId: request.requestId,
-      ownerGeneration,
-      modelId: request.modelId,
-      timeoutMs,
-    };
+function parseSubmitRequestFields(
+  request: Record<string, unknown>,
+): ParsedSubmitRequestFields | null {
+  const parsed = {
+    message: typeof request.message === "string" ? request.message : null,
+    prompt: parseOptionalValue(request.prompt, isPromptInput),
+    permissionMode: parseRequiredValue(request.permissionMode, isPermissionMode),
+    resumePolicy: parseOptionalValue(request.resumePolicy, isSessionResumePolicy),
+    nonInteractivePermissions: parseOptionalValue(
+      request.nonInteractivePermissions,
+      isNonInteractivePermissionPolicy,
+    ),
+    permissionPolicy: parseOptionalValue(request.permissionPolicy, isPermissionPolicy),
+    suppressSdkConsoleErrors: parseOptionalBoolean(request.suppressSdkConsoleErrors),
+    promptRetries: parseNonNegativeInteger(request.promptRetries),
+    waitForCompletion:
+      typeof request.waitForCompletion === "boolean" ? request.waitForCompletion : null,
+    sessionOptions: parseSessionOptions(request.sessionOptions),
+  };
+  if (Object.values(parsed).some((value) => value === null)) {
+    return null;
   }
+  return parsed as ParsedSubmitRequestFields;
+}
 
-  if (request.type === "set_config_option") {
-    if (
-      typeof request.configId !== "string" ||
-      request.configId.trim().length === 0 ||
-      typeof request.value !== "string" ||
-      request.value.trim().length === 0
-    ) {
-      return null;
-    }
-    return {
-      type: "set_config_option",
-      requestId: request.requestId,
-      ownerGeneration,
-      configId: request.configId,
-      value: request.value,
-      timeoutMs,
-    };
+function parseOptionalValue<T>(
+  value: unknown,
+  guard: (value: unknown) => value is T,
+): T | undefined | null {
+  if (value == null) {
+    return undefined;
   }
+  return guard(value) ? value : null;
+}
 
-  return null;
+function parseRequiredValue<T>(value: unknown, guard: (value: unknown) => value is T): T | null {
+  return guard(value) ? value : null;
+}
+
+function parseOptionalBoolean(value: unknown): boolean | undefined | null {
+  if (value == null) {
+    return undefined;
+  }
+  return typeof value === "boolean" ? value : null;
+}
+
+function parseStringFieldRequest<TType extends "set_mode" | "set_model">(
+  request: Record<string, unknown>,
+  context: QueueRequestContext,
+  type: TType,
+  field: "modeId" | "modelId",
+): Extract<QueueRequest, { type: TType }> | null {
+  const value = parseNonEmptyString(request[field]);
+  if (!value) {
+    return null;
+  }
+  return { type, ...context, [field]: value } as Extract<QueueRequest, { type: TType }>;
+}
+
+function parseSetConfigOptionRequest(
+  request: Record<string, unknown>,
+  context: QueueRequestContext,
+): QueueSetConfigOptionRequest | null {
+  const configId = parseNonEmptyString(request.configId);
+  const value = parseNonEmptyString(request.value);
+  if (!configId || !value) {
+    return null;
+  }
+  return { type: "set_config_option", ...context, configId, value };
+}
+
+function parseNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+  return value;
 }
 
 function parseSessionSendResult(raw: unknown): SessionSendResult | null {
   const result = asRecord(raw);
-  if (!result) {
-    return null;
-  }
-
-  if (
-    typeof result.stopReason !== "string" ||
-    typeof result.sessionId !== "string" ||
-    typeof result.resumed !== "boolean"
-  ) {
+  if (!result || !hasValidSessionSendResultCore(result)) {
     return null;
   }
 
@@ -379,42 +555,57 @@ function parseSessionSendResult(raw: unknown): SessionSendResult | null {
     return null;
   }
 
-  const statsValid =
-    typeof permissionStats.requested === "number" &&
-    typeof permissionStats.approved === "number" &&
-    typeof permissionStats.denied === "number" &&
-    typeof permissionStats.cancelled === "number";
-  if (!statsValid) {
+  if (!hasValidPermissionStats(permissionStats)) {
     return null;
   }
 
-  const recordValid =
-    typeof record.acpxRecordId === "string" &&
-    typeof record.acpSessionId === "string" &&
-    typeof record.agentCommand === "string" &&
-    typeof record.cwd === "string" &&
-    typeof record.createdAt === "string" &&
-    typeof record.lastUsedAt === "string" &&
-    Array.isArray(record.messages) &&
-    typeof record.updated_at === "string" &&
-    typeof record.lastSeq === "number" &&
-    Number.isInteger(record.lastSeq) &&
-    !!record.eventLog &&
-    typeof record.eventLog === "object";
-  if (!recordValid) {
+  if (!hasValidSessionRecordShape(record)) {
     return null;
   }
 
   return result as SessionSendResult;
 }
 
+function hasValidSessionSendResultCore(result: Record<string, unknown>): boolean {
+  return (
+    typeof result.stopReason === "string" &&
+    typeof result.sessionId === "string" &&
+    typeof result.resumed === "boolean"
+  );
+}
+
+function hasValidPermissionStats(permissionStats: Record<string, unknown>): boolean {
+  return ["requested", "approved", "denied", "cancelled"].every(
+    (key) => typeof permissionStats[key] === "number",
+  );
+}
+
+function hasValidSessionRecordShape(record: Record<string, unknown>): boolean {
+  return (
+    hasStringFields(record, [
+      "acpxRecordId",
+      "acpSessionId",
+      "agentCommand",
+      "cwd",
+      "createdAt",
+      "lastUsedAt",
+      "updated_at",
+    ]) &&
+    Array.isArray(record.messages) &&
+    typeof record.lastSeq === "number" &&
+    Number.isInteger(record.lastSeq) &&
+    !!record.eventLog &&
+    typeof record.eventLog === "object"
+  );
+}
+
+function hasStringFields(record: Record<string, unknown>, keys: readonly string[]): boolean {
+  return keys.every((key) => typeof record[key] === "string");
+}
+
 export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
   const message = asRecord(raw);
-  if (!message || typeof message.type !== "string") {
-    return null;
-  }
-
-  if (typeof message.requestId !== "string") {
+  if (!message || typeof message.type !== "string" || typeof message.requestId !== "string") {
     return null;
   }
   const ownerGeneration = parseOwnerGeneration(message.ownerGeneration);
@@ -422,120 +613,166 @@ export function parseQueueOwnerMessage(raw: unknown): QueueOwnerMessage | null {
     return null;
   }
 
-  if (message.type === "accepted") {
-    return {
-      type: "accepted",
-      requestId: message.requestId,
-      ownerGeneration,
-    };
+  return parseTypedQueueOwnerMessage(message as TypedQueueOwnerRecord, {
+    requestId: message.requestId,
+    ownerGeneration,
+  });
+}
+
+type QueueOwnerMessageContext = {
+  requestId: string;
+  ownerGeneration: number | undefined;
+};
+
+type TypedQueueOwnerRecord = Record<string, unknown> & { type: string };
+
+function parseTypedQueueOwnerMessage(
+  message: TypedQueueOwnerRecord,
+  context: QueueOwnerMessageContext,
+): QueueOwnerMessage | null {
+  const parser = queueOwnerMessageParser(message.type);
+  return parser ? parser(message, context) : null;
+}
+
+type QueueOwnerMessageParser = (
+  message: Record<string, unknown>,
+  context: QueueOwnerMessageContext,
+) => QueueOwnerMessage | null;
+
+const QUEUE_OWNER_MESSAGE_PARSERS: Record<string, QueueOwnerMessageParser> = {
+  accepted: (_message, context) => ({ type: "accepted", ...context }),
+  event: parseEventOwnerMessage,
+  permission_escalation: parsePermissionEscalationOwnerMessage,
+  result: parseResultOwnerMessage,
+  cancel_result: (message, context) =>
+    parseBooleanResultOwnerMessage(message, context, "cancel_result", "cancelled"),
+  close_session_result: (message, context) =>
+    parseBooleanResultOwnerMessage(message, context, "close_session_result", "closed"),
+  set_mode_result: (message, context) =>
+    parseStringResultOwnerMessage(message, context, "set_mode_result", "modeId"),
+  set_model_result: (message, context) =>
+    parseStringResultOwnerMessage(message, context, "set_model_result", "modelId"),
+  set_config_option_result: parseSetConfigOptionOwnerMessage,
+  error: parseErrorOwnerMessage,
+};
+
+function queueOwnerMessageParser(type: string): QueueOwnerMessageParser | undefined {
+  return Object.hasOwn(QUEUE_OWNER_MESSAGE_PARSERS, type)
+    ? QUEUE_OWNER_MESSAGE_PARSERS[type]
+    : undefined;
+}
+
+function parseEventOwnerMessage(
+  message: Record<string, unknown>,
+  context: QueueOwnerMessageContext,
+): QueueOwnerEventMessage | null {
+  if (!isAcpJsonRpcMessage(message.message)) {
+    return null;
+  }
+  return { type: "event", ...context, message: message.message };
+}
+
+function parsePermissionEscalationOwnerMessage(
+  message: Record<string, unknown>,
+  context: QueueOwnerMessageContext,
+): QueueOwnerPermissionEscalationMessage | null {
+  if (!isPermissionEscalationEvent(message.event)) {
+    return null;
+  }
+  return { type: "permission_escalation", ...context, event: message.event };
+}
+
+function parseResultOwnerMessage(
+  message: Record<string, unknown>,
+  context: QueueOwnerMessageContext,
+): QueueOwnerResultMessage | null {
+  const result = parseSessionSendResult(message.result);
+  if (!result) {
+    return null;
+  }
+  return { type: "result", ...context, result };
+}
+
+function parseBooleanResultOwnerMessage<TType extends "cancel_result" | "close_session_result">(
+  message: Record<string, unknown>,
+  context: QueueOwnerMessageContext,
+  type: TType,
+  field: "cancelled" | "closed",
+): Extract<QueueOwnerMessage, { type: TType }> | null {
+  if (typeof message[field] !== "boolean") {
+    return null;
+  }
+  return { type, ...context, [field]: message[field] } as Extract<
+    QueueOwnerMessage,
+    { type: TType }
+  >;
+}
+
+function parseStringResultOwnerMessage<TType extends "set_mode_result" | "set_model_result">(
+  message: Record<string, unknown>,
+  context: QueueOwnerMessageContext,
+  type: TType,
+  field: "modeId" | "modelId",
+): Extract<QueueOwnerMessage, { type: TType }> | null {
+  if (typeof message[field] !== "string") {
+    return null;
+  }
+  return { type, ...context, [field]: message[field] } as Extract<
+    QueueOwnerMessage,
+    { type: TType }
+  >;
+}
+
+function parseSetConfigOptionOwnerMessage(
+  message: Record<string, unknown>,
+  context: QueueOwnerMessageContext,
+): QueueOwnerSetConfigOptionResultMessage | null {
+  const response = asRecord(message.response);
+  if (!response || !Array.isArray(response.configOptions)) {
+    return null;
+  }
+  return {
+    type: "set_config_option_result",
+    ...context,
+    response: response as SetSessionConfigOptionResponse,
+  };
+}
+
+function parseErrorOwnerMessage(
+  message: Record<string, unknown>,
+  context: QueueOwnerMessageContext,
+): QueueOwnerErrorMessage | null {
+  if (!isValidOwnerErrorCore(message)) {
+    return null;
   }
 
-  if (message.type === "event") {
-    if (!isAcpJsonRpcMessage(message.message)) {
-      return null;
-    }
+  const outputAlreadyEmitted =
+    typeof message.outputAlreadyEmitted === "boolean" ? message.outputAlreadyEmitted : undefined;
 
-    return {
-      type: "event",
-      requestId: message.requestId,
-      ownerGeneration,
-      message: message.message,
-    };
-  }
+  return {
+    type: "error",
+    ...context,
+    code: message.code,
+    detailCode: parseNonEmptyString(message.detailCode) ?? undefined,
+    origin: message.origin,
+    message: message.message,
+    retryable: typeof message.retryable === "boolean" ? message.retryable : undefined,
+    acp: toAcpErrorPayload(message.acp),
+    ...(outputAlreadyEmitted === undefined ? {} : { outputAlreadyEmitted }),
+  };
+}
 
-  if (message.type === "result") {
-    const parsedResult = parseSessionSendResult(message.result);
-    if (!parsedResult) {
-      return null;
-    }
-    return {
-      type: "result",
-      requestId: message.requestId,
-      ownerGeneration,
-      result: parsedResult,
-    };
-  }
-
-  if (message.type === "cancel_result") {
-    if (typeof message.cancelled !== "boolean") {
-      return null;
-    }
-    return {
-      type: "cancel_result",
-      requestId: message.requestId,
-      ownerGeneration,
-      cancelled: message.cancelled,
-    };
-  }
-
-  if (message.type === "set_mode_result") {
-    if (typeof message.modeId !== "string") {
-      return null;
-    }
-    return {
-      type: "set_mode_result",
-      requestId: message.requestId,
-      ownerGeneration,
-      modeId: message.modeId,
-    };
-  }
-
-  if (message.type === "set_model_result") {
-    if (typeof message.modelId !== "string") {
-      return null;
-    }
-    return {
-      type: "set_model_result",
-      requestId: message.requestId,
-      ownerGeneration,
-      modelId: message.modelId,
-    };
-  }
-
-  if (message.type === "set_config_option_result") {
-    const response = asRecord(message.response);
-    if (!response || !Array.isArray(response.configOptions)) {
-      return null;
-    }
-    return {
-      type: "set_config_option_result",
-      requestId: message.requestId,
-      ownerGeneration,
-      response: response as SetSessionConfigOptionResponse,
-    };
-  }
-
-  if (message.type === "error") {
-    if (
-      typeof message.message !== "string" ||
-      !isOutputErrorCode(message.code) ||
-      !isOutputErrorOrigin(message.origin)
-    ) {
-      return null;
-    }
-
-    const detailCode =
-      typeof message.detailCode === "string" && message.detailCode.trim().length > 0
-        ? message.detailCode
-        : undefined;
-    const retryable = typeof message.retryable === "boolean" ? message.retryable : undefined;
-    const acp = toAcpErrorPayload(message.acp);
-    const outputAlreadyEmitted =
-      typeof message.outputAlreadyEmitted === "boolean" ? message.outputAlreadyEmitted : undefined;
-
-    return {
-      type: "error",
-      requestId: message.requestId,
-      ownerGeneration,
-      code: message.code,
-      detailCode,
-      origin: message.origin,
-      message: message.message,
-      retryable,
-      acp,
-      ...(outputAlreadyEmitted === undefined ? {} : { outputAlreadyEmitted }),
-    };
-  }
-
-  return null;
+function isValidOwnerErrorCore(message: Record<string, unknown>): message is Record<
+  string,
+  unknown
+> & {
+  code: OutputErrorCode;
+  origin: OutputErrorOrigin;
+  message: string;
+} {
+  return (
+    typeof message.message === "string" &&
+    isOutputErrorCode(message.code) &&
+    isOutputErrorOrigin(message.origin)
+  );
 }

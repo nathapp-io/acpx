@@ -37,26 +37,40 @@ export function parseJsonObject(
     return direct.value;
   }
 
-  if (mode === "fenced" || mode === "compat") {
-    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fencedMatch) {
-      const fenced = tryParse(fencedMatch[1].trim());
-      if (fenced.ok) {
-        return fenced.value;
-      }
-    }
+  const fenced = parseFencedJsonIfAllowed(trimmed, mode);
+  if (fenced.ok) {
+    return fenced.value;
   }
 
   if (mode === "compat") {
-    for (const candidate of extractBalancedJsonCandidates(trimmed)) {
-      const parsed = tryParse(candidate);
-      if (parsed.ok) {
-        return parsed.value;
-      }
+    const balanced = parseBalancedJsonCandidate(trimmed);
+    if (balanced.ok) {
+      return balanced.value;
     }
   }
 
   throw new Error(`Could not parse JSON from assistant output:\n${trimmed}`);
+}
+
+function parseFencedJsonIfAllowed(
+  text: string,
+  mode: JsonObjectParseMode,
+): { ok: true; value: unknown } | { ok: false } {
+  if (mode !== "fenced" && mode !== "compat") {
+    return { ok: false };
+  }
+  const fencedText = extractFencedJsonText(text);
+  return fencedText === null ? { ok: false } : tryParse(fencedText);
+}
+
+function parseBalancedJsonCandidate(text: string): { ok: true; value: unknown } | { ok: false } {
+  for (const candidate of extractBalancedJsonCandidates(text)) {
+    const parsed = tryParse(candidate);
+    if (parsed.ok) {
+      return parsed;
+    }
+  }
+  return { ok: false };
 }
 
 // Use this when the model contract must be exact JSON and any extra text
@@ -82,6 +96,36 @@ function tryParse(text: string): { ok: true; value: unknown } | { ok: false } {
       ok: false,
     };
   }
+}
+
+function extractFencedJsonText(text: string): string | null {
+  const openingFenceIndex = text.indexOf("```");
+  if (openingFenceIndex === -1) {
+    return null;
+  }
+
+  let contentStart = openingFenceIndex + 3;
+  if (
+    text.slice(contentStart, contentStart + 4).toLowerCase() === "json" &&
+    isFenceWhitespace(text[contentStart + 4])
+  ) {
+    contentStart += 4;
+  }
+
+  while (isFenceWhitespace(text[contentStart])) {
+    contentStart += 1;
+  }
+
+  const closingFenceIndex = text.indexOf("```", contentStart);
+  if (closingFenceIndex === -1) {
+    return null;
+  }
+
+  return text.slice(contentStart, closingFenceIndex).trim();
+}
+
+function isFenceWhitespace(char: string | undefined): boolean {
+  return char === " " || char === "\n" || char === "\r" || char === "\t";
 }
 
 function extractBalancedJsonCandidates(text: string): string[] {
@@ -110,13 +154,9 @@ function scanBalanced(text: string, startIndex: number): string | null {
     const char = text[index];
 
     if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === '"') {
-        inString = false;
-      }
+      const next = scanStringChar(char, escaped);
+      escaped = next.escaped;
+      inString = next.inString;
       continue;
     }
 
@@ -125,25 +165,57 @@ function scanBalanced(text: string, startIndex: number): string | null {
       continue;
     }
 
-    if (char === "{" || char === "[") {
-      stack.push(char);
-      continue;
-    }
-
-    if (char !== "}" && char !== "]") {
-      continue;
-    }
-
-    const last = stack.at(-1);
-    if ((last === "{" && char !== "}") || (last === "[" && char !== "]")) {
-      return null;
-    }
-
-    stack.pop();
-    if (stack.length === 0) {
-      return text.slice(startIndex, index + 1);
+    const result = scanBalancedToken(text, startIndex, index, char, stack);
+    if (result !== SCAN_CONTINUE) {
+      return result;
     }
   }
 
   return null;
+}
+
+const SCAN_CONTINUE = Symbol("scan-continue");
+
+function scanBalancedToken(
+  text: string,
+  startIndex: number,
+  index: number,
+  char: string,
+  stack: string[],
+): string | null | typeof SCAN_CONTINUE {
+  if (char === "{" || char === "[") {
+    stack.push(char);
+    return SCAN_CONTINUE;
+  }
+
+  if (char !== "}" && char !== "]") {
+    return SCAN_CONTINUE;
+  }
+
+  if (!balancedClosingTokenMatches(stack.at(-1), char)) {
+    return null;
+  }
+
+  stack.pop();
+  return stack.length === 0 ? text.slice(startIndex, index + 1) : SCAN_CONTINUE;
+}
+
+function balancedClosingTokenMatches(open: string | undefined, close: string): boolean {
+  if (open === "{") {
+    return close === "}";
+  }
+  if (open === "[") {
+    return close === "]";
+  }
+  return false;
+}
+
+function scanStringChar(char: string, escaped: boolean): { escaped: boolean; inString: boolean } {
+  if (escaped) {
+    return { escaped: false, inString: true };
+  }
+  if (char === "\\") {
+    return { escaped: true, inString: true };
+  }
+  return { escaped: false, inString: char !== '"' };
 }

@@ -76,12 +76,11 @@ What acpx implements from the ACP spec today and what is not yet implemented.
 
 Things acpx needs that aren't in the ACP spec:
 
-- [ ] **Permission policies** — Path-based rules (`allow reads to src/`, `deny
-writes to .env`). Beyond the current all-or-nothing modes.
+- [ ] **Permission policies** — Tool-kind/title policies now exist through `--permission-policy`; path/argument rules (`allow reads to src/`, `deny writes to .env`) are still not supported.
 - [ ] **Multi-agent orchestration** — Agent A prompts Agent B through acpx.
       Session bridging.
 - [ ] **Webhooks / callbacks** — Notify a URL when a prompt finishes. For CI/CD
       and automation pipelines.
-- [ ] **Session export/import** — Move sessions between machines.
+- [x] **Session export/import** — Move sessions between machines.
 - [ ] **Watch mode** — Re-run prompt on file changes.
 - [ ] **Cost/token tracking** — Surface usage stats when agents/ACP expose them.

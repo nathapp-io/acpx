@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
+import path from "node:path";
 import { CopilotAcpUnsupportedError } from "../errors.js";
-import { buildSpawnCommandOptions } from "../spawn-command-options.js";
+import {
+  buildSpawnCommandOptions,
+  readWindowsEnvValue,
+  resolveWindowsCommand,
+} from "../spawn-command-options.js";
 import { type AcpClientOptions } from "../types.js";
 import { basenameToken, splitCommandLine } from "./client-process.js";
 
@@ -288,36 +293,74 @@ export function buildClaudeCodeOptionsMeta(
   }
 
   const claudeCodeOptions: Record<string, unknown> = {};
-  if (typeof options.model === "string" && options.model.trim().length > 0) {
-    claudeCodeOptions.model = options.model;
-  }
-  if (Array.isArray(options.allowedTools)) {
-    claudeCodeOptions.allowedTools = [...options.allowedTools];
-  }
-  if (typeof options.maxTurns === "number") {
-    claudeCodeOptions.maxTurns = options.maxTurns;
-  }
+  assignClaudeCodeOptions(claudeCodeOptions, options);
 
   const meta: Record<string, unknown> = {};
   if (Object.keys(claudeCodeOptions).length > 0) {
     meta.claudeCode = { options: claudeCodeOptions };
   }
 
-  const systemPrompt = options.systemPrompt;
-  if (typeof systemPrompt === "string" && systemPrompt.length > 0) {
-    meta.systemPrompt = systemPrompt;
-  } else if (
-    systemPrompt &&
-    typeof systemPrompt === "object" &&
-    typeof systemPrompt.append === "string" &&
-    systemPrompt.append.length > 0
-  ) {
-    meta.systemPrompt = { append: systemPrompt.append };
-  }
+  assignClaudeCodeSystemPrompt(meta, options.systemPrompt);
 
   if (Object.keys(meta).length === 0) {
     return undefined;
   }
 
   return meta;
+}
+
+function assignClaudeCodeOptions(
+  target: Record<string, unknown>,
+  options: NonNullable<AcpClientOptions["sessionOptions"]>,
+): void {
+  if (typeof options.model === "string" && options.model.trim().length > 0) {
+    target.model = options.model;
+  }
+  if (Array.isArray(options.allowedTools)) {
+    target.allowedTools = [...options.allowedTools];
+  }
+  if (typeof options.maxTurns === "number") {
+    target.maxTurns = options.maxTurns;
+  }
+}
+
+function assignClaudeCodeSystemPrompt(
+  target: Record<string, unknown>,
+  systemPrompt: NonNullable<AcpClientOptions["sessionOptions"]>["systemPrompt"],
+): void {
+  if (typeof systemPrompt === "string" && systemPrompt.length > 0) {
+    target.systemPrompt = systemPrompt;
+    return;
+  }
+  if (isAppendSystemPrompt(systemPrompt)) {
+    target.systemPrompt = { append: systemPrompt.append };
+  }
+}
+
+function isAppendSystemPrompt(
+  value: NonNullable<AcpClientOptions["sessionOptions"]>["systemPrompt"],
+): value is { append: string } {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof value.append === "string" &&
+    value.append.length > 0
+  );
+}
+
+export function resolveClaudeCodeExecutable(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  if (platform !== "win32") {
+    return undefined;
+  }
+  if (readWindowsEnvValue(env, "CLAUDE_CODE_EXECUTABLE")) {
+    return undefined;
+  }
+  const resolved = resolveWindowsCommand("claude", env);
+  if (!resolved) {
+    return undefined;
+  }
+  return path.resolve(resolved);
 }
