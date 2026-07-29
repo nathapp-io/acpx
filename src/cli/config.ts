@@ -17,9 +17,10 @@ import { toTimerMilliseconds } from "./timer-duration.js";
 export type ResolvedAgentConfig = {
   command: string;
   argv?: string[];
+  model?: string;
 };
 
-type ConfigAgentEntry = { command: string } | { argv: string[] };
+type ConfigAgentEntry = ({ command: string } | { argv: string[] }) & { model?: string };
 
 type ConfigFileShape = {
   defaultAgent?: unknown;
@@ -245,7 +246,8 @@ function parseArgvAgentEntry(
     );
   }
   const argv = parseAgentArgv(raw.argv, name, sourcePath);
-  return { command: renderArgv(argv), argv };
+  const model = parseAgentModel(raw.model, name, sourcePath);
+  return { command: renderArgv(argv), argv, ...(model ? { model } : {}) };
 }
 
 function parseLegacyAgentEntry(
@@ -260,8 +262,9 @@ function parseLegacyAgentEntry(
     );
   }
   const trimmedCommand = command.trim();
+  const model = parseAgentModel(raw.model, name, sourcePath);
   if (!Object.prototype.hasOwnProperty.call(raw, "args")) {
-    return { command: trimmedCommand };
+    return { command: trimmedCommand, ...(model ? { model } : {}) };
   }
   if (/[\s'"]/u.test(trimmedCommand)) {
     throw new Error(
@@ -273,6 +276,7 @@ function parseLegacyAgentEntry(
     command:
       args.length > 0 ? `${trimmedCommand} ${args.map(quoteCommandArg).join(" ")}` : trimmedCommand,
     argv: [trimmedCommand, ...args],
+    ...(model ? { model } : {}),
   };
 }
 
@@ -296,6 +300,22 @@ function parseAgentArgv(value: unknown, agentName: string, sourcePath: string): 
     );
   }
   return argv;
+}
+
+function parseAgentModel(
+  value: unknown,
+  agentName: string,
+  sourcePath: string,
+): string | undefined {
+  if (value == null) {
+    return undefined;
+  }
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(
+      `Invalid config agents.${agentName}.model in ${sourcePath}: expected non-empty string`,
+    );
+  }
+  return value.trim();
 }
 
 function parseAgentArgs(value: unknown, agentName: string, sourcePath: string): string[] {
@@ -672,7 +692,10 @@ export function toConfigDisplay(config: ResolvedAcpxConfig): {
 } {
   const agents: Record<string, ConfigAgentEntry> = {};
   for (const [name, agent] of Object.entries(config.agents)) {
-    agents[name] = agent.argv ? { argv: [...agent.argv] } : { command: agent.command };
+    const base: ConfigAgentEntry = agent.argv
+      ? { argv: [...agent.argv] }
+      : { command: agent.command };
+    agents[name] = agent.model ? { ...base, model: agent.model } : base;
   }
 
   return {
