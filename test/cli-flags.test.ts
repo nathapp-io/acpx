@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Command } from "commander";
+import { sessionOptionsFromGlobalFlags } from "../src/cli/command-handlers.js";
 import type { ResolvedAcpxConfig } from "../src/cli/config.js";
 import {
   addGlobalFlags,
@@ -587,4 +588,24 @@ test("resolveAgentInvocation reports no model for a built-in or an --agent overr
       .model,
     undefined,
   );
+});
+
+test("an explicit --model wins over a configured agent model", () => {
+  const flags = {
+    cwd: "/repo",
+    nonInteractivePermissions: "deny",
+    ttl: 300_000,
+    format: "text",
+  } as const;
+  const agent = { model: "agent-model" };
+
+  // explicit flag beats config
+  assert.equal(
+    sessionOptionsFromGlobalFlags({ ...flags, model: "flag-model" }, agent).model,
+    "flag-model",
+  );
+  // agent model is the fallback when no flag was given
+  assert.equal(sessionOptionsFromGlobalFlags(flags, agent).model, "agent-model");
+  // neither set stays undefined
+  assert.equal(sessionOptionsFromGlobalFlags(flags, {}).model, undefined);
 });

@@ -183,11 +183,21 @@ function resolveRequestedOutputPolicy(globalFlags: {
 
 type ResolvedAgentInvocation = ReturnType<typeof resolveAgentInvocation>;
 
-function sessionOptionsFromGlobalFlags(
+/**
+ * Session options for a CLI invocation.
+ *
+ * An explicit `--model` wins over an agent entry's configured model: on the CLI
+ * the flag is a per-invocation instruction the user just typed, so config must
+ * not silently override it. (Inside a flow the order is inverted - there
+ * `--model` is a run-wide default and a node/agent pin is the more specific
+ * signal. See mergeSessionModel in src/flows/runtime.ts.)
+ */
+export function sessionOptionsFromGlobalFlags(
   globalFlags: GlobalFlags,
+  agent?: Pick<ResolvedAgentInvocation, "model">,
 ): NonNullable<Parameters<SessionModule["createSession"]>[0]["sessionOptions"]> {
   return {
-    model: globalFlags.model,
+    model: globalFlags.model ?? agent?.model,
     allowedTools: globalFlags.allowedTools,
     maxTurns: globalFlags.maxTurns,
     systemPrompt: globalFlags.systemPrompt,
@@ -229,7 +239,7 @@ function buildSessionStartOptions(params: {
     terminal: params.globalFlags.terminal,
     timeoutMs: params.globalFlags.timeout,
     verbose: params.globalFlags.verbose,
-    sessionOptions: sessionOptionsFromGlobalFlags(params.globalFlags),
+    sessionOptions: sessionOptionsFromGlobalFlags(params.globalFlags, params.agent),
     onModelWarning: params.globalFlags.jsonStrict
       ? undefined
       : (message) => process.stderr.write(`[acpx] warning: ${message}\n`),
@@ -369,7 +379,7 @@ export async function handlePrompt(
     verbose: globalFlags.verbose,
     waitForCompletion: flags.wait !== false,
     sessionOptions: {
-      model: globalFlags.model,
+      model: globalFlags.model ?? agent.model,
       allowedTools: globalFlags.allowedTools,
       maxTurns: globalFlags.maxTurns,
       systemPrompt: globalFlags.systemPrompt,
@@ -456,7 +466,7 @@ export async function handleExec(
     verbose: globalFlags.verbose,
     promptRetries: globalFlags.promptRetries,
     sessionOptions: {
-      model: globalFlags.model,
+      model: globalFlags.model ?? agent.model,
       allowedTools: globalFlags.allowedTools,
       maxTurns: globalFlags.maxTurns,
       systemPrompt: globalFlags.systemPrompt,

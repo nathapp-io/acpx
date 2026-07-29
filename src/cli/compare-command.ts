@@ -274,9 +274,12 @@ function rowStatusFromPermissionStats(stats: PermissionStats): CompareRow["statu
   return deniedOrCancelled > 0 ? "permission_denied" : "ok";
 }
 
-function sessionOptionsFromGlobalFlags(globalFlags: ReturnType<typeof resolveGlobalFlags>) {
+function sessionOptionsFromGlobalFlags(
+  globalFlags: ReturnType<typeof resolveGlobalFlags>,
+  agent?: { model?: string },
+) {
   return {
-    model: globalFlags.model,
+    model: globalFlags.model ?? agent?.model,
     allowedTools: globalFlags.allowedTools,
     maxTurns: globalFlags.maxTurns,
     systemPrompt: globalFlags.systemPrompt,
@@ -374,7 +377,7 @@ async function runAgentForCompare(params: {
       timeoutMs: params.globalFlags.timeout ?? DEFAULT_COMPARE_TIMEOUT_MS,
       verbose: params.globalFlags.verbose,
       promptRetries: params.globalFlags.promptRetries,
-      sessionOptions: sessionOptionsFromGlobalFlags(params.globalFlags),
+      sessionOptions: sessionOptionsFromGlobalFlags(params.globalFlags, agent),
       onSessionUpdate: (notification) => captureSessionUpdate(notification, capture),
     });
     return buildSuccessRow(params.agentName, result, capture, t0);
