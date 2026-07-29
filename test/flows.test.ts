@@ -16,6 +16,7 @@ import {
   checkpoint,
   compute,
   defineFlow,
+  mergeSessionModel,
   shell,
 } from "../src/flows/runtime.js";
 import type {
@@ -1836,8 +1837,29 @@ test("acp nodes accept an optional model", () => {
 });
 
 test("acp node model must be a non-empty string", () => {
-  assert.throws(
-    () => acp({ prompt: () => "", model: "" } as unknown as Parameters<typeof acp>[0]),
-    /Invalid acp node definition: model/,
+  assert.throws(() => acp({ prompt: () => "", model: "" }), /Invalid acp node definition: model/);
+});
+
+test("model precedence is node, then agent, then the global --model", () => {
+  const globalOptions = { model: "global-model" };
+  const agentWith = { agentName: "a", agentCommand: "c", cwd: "/tmp", model: "agent-model" };
+  const agentWithout = { agentName: "a", agentCommand: "c", cwd: "/tmp" };
+
+  assert.equal(
+    mergeSessionModel({ model: "node-model" }, agentWith, globalOptions).model,
+    "node-model",
   );
+  assert.equal(mergeSessionModel({}, agentWith, globalOptions).model, "agent-model");
+  assert.equal(mergeSessionModel({}, agentWithout, globalOptions).model, "global-model");
+  assert.equal(mergeSessionModel({}, agentWithout, undefined).model, undefined);
+});
+
+test("merging the session model preserves the other session options", () => {
+  const merged = mergeSessionModel(
+    { model: "node-model" },
+    { agentName: "a", agentCommand: "c", cwd: "/tmp" },
+    { model: "global-model", maxTurns: 7 },
+  );
+  assert.equal(merged.model, "node-model");
+  assert.equal(merged.maxTurns, 7);
 });
