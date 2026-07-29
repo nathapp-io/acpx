@@ -554,3 +554,37 @@ test("resolveAgentInvocation applies canonical config overrides through aliases"
     },
   );
 });
+
+test("resolveAgentInvocation carries a configured agent model", () => {
+  const flags = {
+    cwd: "/repo",
+    nonInteractivePermissions: "deny",
+    ttl: 300_000,
+    format: "text",
+  } as const;
+  const cfg = config({
+    agents: {
+      "spec-reviewer": { command: "claude-agent-acp", model: "opus" },
+      plain: { command: "codex-acp" },
+    },
+  });
+
+  assert.equal(resolveAgentInvocation("spec-reviewer", flags, cfg).model, "opus");
+  assert.equal(resolveAgentInvocation("plain", flags, cfg).model, undefined);
+});
+
+test("resolveAgentInvocation reports no model for a built-in or an --agent override", () => {
+  const flags = {
+    cwd: "/repo",
+    nonInteractivePermissions: "deny",
+    ttl: 300_000,
+    format: "text",
+  } as const;
+
+  assert.equal(resolveAgentInvocation("codex", flags, config({ agents: {} })).model, undefined);
+  assert.equal(
+    resolveAgentInvocation(undefined, { ...flags, agent: "custom-acp" }, config({ agents: {} }))
+      .model,
+    undefined,
+  );
+});
