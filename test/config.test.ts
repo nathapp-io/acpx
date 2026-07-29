@@ -499,6 +499,43 @@ test("loadResolvedConfig rejects ambiguous or quoted legacy command plus args", 
   });
 });
 
+test("agent entries carry an optional model in both entry shapes", async () => {
+  await withTempEnv(async ({ homeDir }) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify({
+        agents: {
+          "legacy-shape": { command: "codex-acp", args: ["--flag"], model: "gpt-5.6-luna" },
+          "argv-shape": { argv: ["npx", "-y", "claude-agent-acp"], model: "opus" },
+          "no-model": { command: "codex-acp" },
+        },
+      })}\n`,
+    );
+
+    const config = await loadResolvedConfig(cwd);
+    assert.equal(config.agents["legacy-shape"]?.model, "gpt-5.6-luna");
+    assert.equal(config.agents["argv-shape"]?.model, "opus");
+    assert.equal(config.agents["no-model"]?.model, undefined);
+  });
+});
+
+test("agent model must be a non-empty string", async () => {
+  await withTempEnv(async ({ homeDir }) => {
+    const cwd = path.join(homeDir, "workspace");
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+    await fs.writeFile(
+      path.join(homeDir, ".acpx", "config.json"),
+      `${JSON.stringify({ agents: { bad: { command: "codex-acp", model: "  " } } })}\n`,
+    );
+
+    await assert.rejects(async () => await loadResolvedConfig(cwd), /agents\.bad\.model/);
+  });
+});
+
 async function withTempEnv(run: (ctx: { homeDir: string }) => Promise<void>): Promise<void> {
   const originalHome = process.env.HOME;
 
