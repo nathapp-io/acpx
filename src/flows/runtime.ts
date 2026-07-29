@@ -142,6 +142,22 @@ type PreparedAcpPrompt = {
   nodeTimeoutMs: number | undefined;
 };
 
+/**
+ * Model precedence for one node: the node's own pin beats the agent entry's
+ * model, which beats the run-wide --model. Other session options pass through.
+ *
+ * Applied when a session is created, so an isolated node gets its own model.
+ * Nodes sharing a session handle share the model of whichever created it.
+ */
+export function mergeSessionModel(
+  node: Pick<AcpNodeDefinition, "model">,
+  agent: ResolvedFlowAgent,
+  sessionOptions: FlowRunnerOptions["sessionOptions"],
+): NonNullable<FlowRunnerOptions["sessionOptions"]> {
+  const model = node.model ?? agent.model ?? sessionOptions?.model;
+  return { ...sessionOptions, model };
+}
+
 export class FlowRunner {
   private readonly resolveAgent;
   private readonly defaultCwd;
@@ -827,6 +843,7 @@ export class FlowRunner {
       runDir,
       state,
       binding,
+      node,
       prepared.agentInfo,
       prepared.prompt,
       prepared.nodeTimeoutMs,
@@ -1072,7 +1089,7 @@ export class FlowRunner {
       fs: this.fs,
       timeoutMs,
       verbose: this.verbose,
-      sessionOptions: this.sessionOptions,
+      sessionOptions: mergeSessionModel(node, agent, this.sessionOptions),
     });
 
     const binding: FlowSessionBinding = {
@@ -1203,6 +1220,7 @@ export class FlowRunner {
     runDir: string,
     state: FlowRunState,
     binding: FlowSessionBinding,
+    node: AcpNodeDefinition,
     agent: ResolvedFlowAgent,
     prompt: PromptInput,
     timeoutMs?: number,
@@ -1245,7 +1263,7 @@ export class FlowRunner {
       suppressSdkConsoleErrors: this.suppressSdkConsoleErrors,
       timeoutMs,
       verbose: this.verbose,
-      sessionOptions: this.sessionOptions,
+      sessionOptions: mergeSessionModel(node, agent, this.sessionOptions),
     });
     await Promise.all(pendingEventWrites);
     const sessionInfo: FlowSessionBinding = {
