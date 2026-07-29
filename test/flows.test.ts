@@ -1822,3 +1822,22 @@ async function waitFor<T>(fn: () => Promise<T | null>, timeoutMs: number): Promi
 
   throw lastError instanceof Error ? lastError : new Error("Timed out waiting for condition");
 }
+
+test("acp nodes accept an optional model", () => {
+  const pinned = acp({
+    profile: "spec-reviewer",
+    model: "opus",
+    prompt: () => "review this",
+  });
+  assert.equal(pinned.model, "opus");
+
+  const unpinned = acp({ prompt: () => "review this" });
+  assert.equal(unpinned.model, undefined);
+});
+
+test("acp node model must be a non-empty string", () => {
+  assert.throws(
+    () => acp({ prompt: () => "", model: "" } as unknown as Parameters<typeof acp>[0]),
+    /Invalid acp node definition: model/,
+  );
+});

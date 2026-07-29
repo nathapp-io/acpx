@@ -53,6 +53,7 @@ export type FlowEdge =
 export type AcpNodeDefinition = FlowNodeCommon & {
   nodeType: "acp";
   profile?: string;
+  model?: string;
   cwd?: string | ((context: FlowNodeContext) => MaybePromise<string | undefined>);
   session?: {
     handle?: string;
@@ -337,6 +338,7 @@ export type ResolvedFlowAgent = {
   agentName: string;
   agentCommand: string;
   agentArgv?: string[];
+  model?: string;
   cwd: string;
 };
 
