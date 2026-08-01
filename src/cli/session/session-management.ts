@@ -3,7 +3,10 @@ import { formatErrorMessage } from "../../acp/error-normalization.js";
 import { modelStateFromConfigOptions } from "../../acp/model-support.js";
 import { withInterrupt, withTimeout } from "../../async-control.js";
 import { applyLifecycleSnapshotToRecord } from "../../runtime/engine/lifecycle.js";
-import { persistSessionOptions } from "../../runtime/engine/session-options.js";
+import {
+  persistSessionOptions,
+  sessionCreationModel,
+} from "../../runtime/engine/session-options.js";
 import { applyConfigOptionsToRecord } from "../../session/config-options.js";
 import { createSessionConversation } from "../../session/conversation-model.js";
 import { defaultSessionEventLog } from "../../session/event-log.js";
@@ -79,7 +82,7 @@ async function createSessionRecordWithClient(
   };
 
   persistSessionOptions(record, options.sessionOptions);
-  applyCreatedSessionModelState(record, createdState, options.sessionOptions?.model);
+  applyCreatedSessionModelState(record, createdState, sessionCreationModel(options.sessionOptions));
 
   await writeSessionRecord(record);
   return record;
@@ -115,7 +118,7 @@ async function createFreshSessionState(
   const modelApplication = await applyRequestedModelIfAdvertised({
     client,
     sessionId: createdSession.sessionId,
-    requestedModel: options.sessionOptions?.model,
+    requestedModel: sessionCreationModel(options.sessionOptions),
     models: createdSession.models,
     agentCommand: options.agentCommand,
     timeoutMs: options.timeoutMs,
@@ -161,7 +164,7 @@ async function resumeSessionRecordWithClient(
     const modelApplication = await applyRequestedModelIfAdvertised({
       client,
       sessionId: options.resumeSessionId,
-      requestedModel: options.sessionOptions?.model,
+      requestedModel: sessionCreationModel(options.sessionOptions),
       models: sessionModels,
       agentCommand: options.agentCommand,
       timeoutMs: options.timeoutMs,

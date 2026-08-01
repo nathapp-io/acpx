@@ -68,6 +68,7 @@ import { connectAndLoadSession, type ConnectAndLoadSessionResult } from "./recon
 import { shouldReuseExistingRecord } from "./reuse-policy.js";
 import {
   persistSessionOptions,
+  sessionCreationModel,
   sessionOptionsFromRecord,
   type SessionAgentOptions,
 } from "./session-options.js";
@@ -772,7 +773,7 @@ export class AcpRuntimeManager {
     const modelApplication = await applyRequestedModelIfAdvertised({
       client,
       sessionId: session.sessionId,
-      requestedModel: input.sessionOptions?.model,
+      requestedModel: sessionCreationModel(input.sessionOptions),
       models: session.sessionResult.models,
       agentCommand,
       timeoutMs: this.options.timeoutMs,
@@ -787,7 +788,10 @@ export class AcpRuntimeManager {
     if (modelApplication.applied) {
       setCurrentModelId(
         record,
-        currentModelIdFromSetModelResponse(modelApplication.response, input.sessionOptions?.model),
+        currentModelIdFromSetModelResponse(
+          modelApplication.response,
+          sessionCreationModel(input.sessionOptions),
+        ),
       );
     }
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());

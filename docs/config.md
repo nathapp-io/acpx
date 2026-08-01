@@ -124,6 +124,16 @@ acpx --model gpt-5 codex 'do the thing'
 
 An explicit `--model` always overrides the configured value — the flag is a per-invocation instruction, so config must not silently take it back. Inside a flow the precedence is inverted, because there `--model` is a run-wide default rather than a per-step one; see [Flows](flows.md#model-selection).
 
+The configured model seeds a session when it is **created**. It is never reapplied to an existing session, so a model you select on a live session with `set model` survives later prompts:
+
+```bash
+acpx codex sessions new        # starts on agents.codex.model
+acpx codex set model gpt-5     # switch this session
+acpx codex 'and continue'      # still gpt-5, not the configured default
+```
+
+Use `--model` when you want to change the model of an existing session for one invocation.
+
 The same adapter caveats as `--model` apply: an agent only honors the model if it consumes session-creation metadata or advertises a model config option. See [`--model`](CLI.md).
 
 Project config can shadow global config by re-declaring the same key:
