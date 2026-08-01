@@ -103,6 +103,31 @@ acp({
 
 This lets a flow `action` step (e.g., `git worktree add`) prepare an isolated workspace, then have downstream `acp` nodes operate inside that cwd. `examples/flows/workdir.flow.ts` shows the pattern end-to-end.
 
+## Model selection
+
+`acp` nodes can pin their own model, so a cheap summarization step and an expensive implementation step do not have to share one (`decision()` accepts `model` too, since it builds an `acp` node):
+
+```ts
+summarize: acp({
+  model: "gpt-5-mini",
+  prompt: ({ task }) => `Summarize in one line: ${task}`,
+}),
+fix: acp({
+  model: "gpt-5-codex",
+  prompt: ({ task }) => `Implement and verify: ${task}`,
+}),
+```
+
+Precedence for a step, most specific first:
+
+1. the node's own `model`
+2. `agents.<name>.model` for the agent that step resolves to (see [config](config.md#agent-model))
+3. the run-wide `--model` flag
+
+Note this is the inverse of the plain CLI, where `--model` beats the configured agent model. In a flow, `--model` is a default for the whole run and a node or agent pin is the more specific signal.
+
+The model is applied when a session is created. A node that runs in its own session gets its own model; nodes that share a session handle share the model of whichever node created that session.
+
 ## Permissions
 
 Flows can declare an explicit permission requirement. If a flow needs `approve-all` and you forget the flag, `acpx` fails fast before the first step runs and prints the flag to add:

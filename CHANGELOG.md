@@ -9,6 +9,8 @@ Repo: https://github.com/openclaw/acpx
 ### Changes
 
 - Docs/readme: rewrite the project front door to the house standard and route detailed CLI guidance to the existing documentation.
+- Agent entries in config accept an optional `model`, used as the default model for sessions started with that agent. An explicit `--model` still wins on the CLI.
+- Flow `acp` nodes accept an optional `model`. Precedence per step is node model, then the resolved agent's configured model, then the run-wide `--model`.
 
 ### Breaking
 
