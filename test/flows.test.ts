@@ -1838,6 +1838,12 @@ test("acp nodes accept an optional model", () => {
 
 test("acp node model must be a non-empty string", () => {
   assert.throws(() => acp({ prompt: () => "", model: "" }), /Invalid acp node definition: model/);
+  // A blank pin would otherwise suppress the agent and global fallbacks while
+  // requesting no model at all.
+  assert.throws(
+    () => acp({ prompt: () => "", model: "   " }),
+    /Invalid acp node definition: model/,
+  );
 });
 
 test("model precedence is node, then agent, then the global --model", () => {
