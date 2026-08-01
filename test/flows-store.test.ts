@@ -67,6 +67,7 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
         }),
         prompt: acp({
           profile: "mock",
+          model: "mock-model",
           session: {
             handle: "review",
             isolated: true,
@@ -120,6 +121,7 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
         string,
         {
           nodeType: string;
+          model?: string;
           timeoutMs?: number;
           heartbeatMs?: number;
           statusDetail?: string;
@@ -181,6 +183,7 @@ test("FlowRunStore writes manifest, projections, flow snapshot, and trace events
     assert.equal(flowSnapshot.nodes.prepare?.statusDetail, "Preparing");
     assert.equal(flowSnapshot.nodes.prompt?.nodeType, "acp");
     assert.equal(flowSnapshot.nodes.prompt?.hasPrompt, true);
+    assert.equal(flowSnapshot.nodes.prompt?.model, "mock-model");
     assert.equal(flowSnapshot.nodes.prompt?.hasParse, true);
     assert.equal(flowSnapshot.nodes.prompt?.cwd?.mode, "dynamic");
     assert.deepEqual(flowSnapshot.nodes.prompt?.session, {
