@@ -91,7 +91,8 @@ Custom agents and overrides live here:
       "argv": ["./bin/my-acp-server", "acp", "--profile", "ci"]
     },
     "codex": {
-      "argv": ["/usr/local/bin/codex-acp", "--mode", "stable"]
+      "argv": ["/usr/local/bin/codex-acp", "--mode", "stable"],
+      "model": "gpt-5-codex"
     }
   }
 }
@@ -100,6 +101,7 @@ Custom agents and overrides live here:
 Rules:
 
 - Keys are friendly names you would type at `acpx <name> …`.
+- `model` is optional and must be a non-empty string. It is the default model for sessions started with that agent, so you do not have to repeat `--model` on every invocation.
 - `argv` is the preferred form and is required for custom agent launches on Windows. Its first item is the executable and every remaining item is passed literally as one argument.
 - Legacy `{ "command": "…", "args": […] }` entries migrate when `command` is an unquoted executable with no whitespace. Quoted executables and inline arguments are rejected as ambiguous; move the complete launch to `argv`.
 - A legacy `command` without `args` remains a raw command string for Unix compatibility. Windows rejects it with migration guidance because inferring argv would corrupt paths and quoting.
@@ -107,6 +109,22 @@ Rules:
 - Windows cannot execute `.sh` files directly. Name the interpreter explicitly, for example `"argv": ["bash", "C:\\tools\\bin\\agent.sh"]`; acpx does not discover or infer an interpreter.
 - On Windows, close and recreate custom-agent sessions created by an older acpx release so their records persist structured argv. Known built-in commands migrate automatically.
 - An entry that shares a name with a built-in **replaces** the built-in for that name.
+
+### Agent model
+
+`agents.<name>.model` sets the default model for that agent:
+
+```bash
+# uses agents.codex.model
+acpx codex 'do the thing'
+
+# --model wins for this invocation
+acpx --model gpt-5 codex 'do the thing'
+```
+
+An explicit `--model` always overrides the configured value — the flag is a per-invocation instruction, so config must not silently take it back. Inside a flow the precedence is inverted, because there `--model` is a run-wide default rather than a per-step one; see [Flows](flows.md#model-selection).
+
+The same adapter caveats as `--model` apply: an agent only honors the model if it consumes session-creation metadata or advertises a model config option. See [`--model`](CLI.md).
 
 Project config can shadow global config by re-declaring the same key:
 

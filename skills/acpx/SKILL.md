@@ -264,7 +264,7 @@ Behavior:
 - `--suppress-reads`: suppress raw read-file contents while preserving the selected format
 - `--timeout <seconds>`: max wait time (positive number)
 - `--ttl <seconds>`: queue owner idle TTL before shutdown (default `300`, `0` disables TTL)
-- `--model <id>`: request an agent model during session creation; non-Claude agents must advertise a model config option or legacy `models` metadata
+- `--model <id>`: request an agent model during session creation; overrides `agents.<name>.model` from config; non-Claude agents must advertise a model config option or legacy `models` metadata
 - `--system-prompt <text>`: replace the agent system prompt. Forwarded to claude-agent-acp via ACP `_meta.systemPrompt`; persisted in `session_options.system_prompt` so reuse keeps the override. Other agents ignore the field.
 - `--append-system-prompt <text>`: append text to the agent system prompt. Forwarded to claude-agent-acp via ACP `_meta.systemPrompt.append`; same persistence rules as `--system-prompt`.
 - `--allowed-tools <list>`: comma-separated tool whitelist (use `""` for no tools)
