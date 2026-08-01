@@ -134,6 +134,7 @@ export type FlowDefinition = {
 export type FlowNodeSnapshot = FlowNodeCommon & {
   nodeType: FlowNodeDefinition["nodeType"];
   profile?: string;
+  model?: string;
   session?: {
     handle?: string;
     isolated?: boolean;
