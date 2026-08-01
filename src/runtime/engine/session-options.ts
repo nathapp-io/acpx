@@ -4,6 +4,13 @@ export type SystemPromptOption = string | { append: string };
 
 export type SessionAgentOptions = {
   model?: string;
+  /**
+   * Model to use when a session is created and no explicit `model` was
+   * requested. Unlike `model` it is never applied to an existing session, so a
+   * configured default cannot take back a model the user selected with
+   * `set model`. Not persisted with the session record.
+   */
+  defaultModel?: string;
   allowedTools?: string[];
   maxTurns?: number;
   systemPrompt?: SystemPromptOption;
@@ -23,13 +30,23 @@ export function mergeSessionOptions(
   preferred: SessionAgentOptions | undefined,
   fallback: SessionAgentOptions | undefined,
 ): SessionAgentOptions | undefined {
+  const { model, defaultModel, allowedTools, maxTurns, systemPrompt, env } = preferred ?? {};
   const merged: SessionAgentOptions = { ...fallback };
-  assignDefinedOption(merged, "model", preferred?.model);
-  assignDefinedOption(merged, "allowedTools", preferred?.allowedTools);
-  assignDefinedOption(merged, "maxTurns", preferred?.maxTurns);
-  assignDefinedOption(merged, "systemPrompt", preferred?.systemPrompt);
-  assignDefinedOption(merged, "env", mergeEnvRecords(fallback?.env, preferred?.env));
+  assignDefinedOption(merged, "model", model);
+  assignDefinedOption(merged, "defaultModel", defaultModel);
+  assignDefinedOption(merged, "allowedTools", allowedTools);
+  assignDefinedOption(merged, "maxTurns", maxTurns);
+  assignDefinedOption(merged, "systemPrompt", systemPrompt);
+  assignDefinedOption(merged, "env", mergeEnvRecords(fallback?.env, env));
   return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+/**
+ * Model to request while creating a session: an explicit `model` first, then a
+ * configured default. Existing-session paths use `model` alone.
+ */
+export function sessionCreationModel(options: SessionAgentOptions | undefined): string | undefined {
+  return options?.model ?? options?.defaultModel;
 }
 
 function mergeEnvRecords(

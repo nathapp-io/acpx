@@ -186,18 +186,22 @@ type ResolvedAgentInvocation = ReturnType<typeof resolveAgentInvocation>;
 /**
  * Session options for a CLI invocation.
  *
- * An explicit `--model` wins over an agent entry's configured model: on the CLI
- * the flag is a per-invocation instruction the user just typed, so config must
- * not silently override it. (Inside a flow the order is inverted - there
- * `--model` is a run-wide default and a node/agent pin is the more specific
- * signal. See mergeSessionModel in src/flows/runtime.ts.)
+ * An agent entry's configured model travels as `defaultModel`, which seeds a
+ * session at creation only. An explicit `--model` wins over it: on the CLI the
+ * flag is a per-invocation instruction the user just typed, so config must not
+ * silently override it, and a configured default must not take back a model
+ * the user selected with `set model` on a live session. (Inside a flow the
+ * order is inverted - there `--model` is a run-wide default and a node/agent
+ * pin is the more specific signal. See mergeSessionModel in
+ * src/flows/runtime.ts.)
  */
 export function sessionOptionsFromGlobalFlags(
   globalFlags: GlobalFlags,
   agent?: Pick<ResolvedAgentInvocation, "model">,
 ): NonNullable<Parameters<SessionModule["createSession"]>[0]["sessionOptions"]> {
   return {
-    model: globalFlags.model ?? agent?.model,
+    model: globalFlags.model,
+    ...(agent?.model ? { defaultModel: agent.model } : {}),
     allowedTools: globalFlags.allowedTools,
     maxTurns: globalFlags.maxTurns,
     systemPrompt: globalFlags.systemPrompt,
@@ -379,7 +383,8 @@ export async function handlePrompt(
     verbose: globalFlags.verbose,
     waitForCompletion: flags.wait !== false,
     sessionOptions: {
-      model: globalFlags.model ?? agent.model,
+      model: globalFlags.model,
+      ...(agent.model ? { defaultModel: agent.model } : {}),
       allowedTools: globalFlags.allowedTools,
       maxTurns: globalFlags.maxTurns,
       systemPrompt: globalFlags.systemPrompt,
@@ -466,7 +471,8 @@ export async function handleExec(
     verbose: globalFlags.verbose,
     promptRetries: globalFlags.promptRetries,
     sessionOptions: {
-      model: globalFlags.model ?? agent.model,
+      model: globalFlags.model,
+      ...(agent.model ? { defaultModel: agent.model } : {}),
       allowedTools: globalFlags.allowedTools,
       maxTurns: globalFlags.maxTurns,
       systemPrompt: globalFlags.systemPrompt,

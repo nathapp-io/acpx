@@ -21,6 +21,7 @@ import { runPromptTurn } from "../../runtime/engine/prompt-turn.js";
 import { connectAndLoadSession } from "../../runtime/engine/reconnect.js";
 import {
   mergeSessionOptions,
+  sessionCreationModel,
   sessionOptionsFromRecord,
   type SessionAgentOptions,
 } from "../../runtime/engine/session-options.js";
@@ -1184,7 +1185,7 @@ export async function runOnce(options: RunOnceOptions): Promise<RunPromptResult>
         await applyRequestedModelIfAdvertised({
           client,
           sessionId,
-          requestedModel: options.sessionOptions?.model,
+          requestedModel: sessionCreationModel(options.sessionOptions),
           models: createdSession.models,
           agentCommand: options.agentCommand,
           timeoutMs: options.timeoutMs,

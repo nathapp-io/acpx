@@ -1470,6 +1470,49 @@ test("integration: exec --model sets the advertised model config option", async 
   });
 });
 
+test("integration: a configured agent model is applied when a session is created", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+      await fs.writeFile(
+        path.join(homeDir, ".acpx", "config.json"),
+        `${JSON.stringify(
+          {
+            agents: {
+              codex: {
+                command: `node ${JSON.stringify(MOCK_AGENT_PATH)} --advertise-models`,
+                model: "fast-model",
+              },
+            },
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+
+      const result = await runCli(
+        ["--approve-all", "--cwd", cwd, "--format", "json", "codex", "exec", "echo hello"],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const setModelRequest = payloads.find(
+        (payload) =>
+          payload.method === "session/set_config_option" &&
+          (payload.params as { configId?: unknown } | undefined)?.configId === "model",
+      ) as { params?: { configId?: string; value?: string } } | undefined;
+      assert(setModelRequest, "expected the configured model to be requested at session creation");
+      assert.equal(setModelRequest.params?.value, "fast-model");
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: exec --model fails when agent does not advertise models", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

@@ -279,7 +279,8 @@ function sessionOptionsFromGlobalFlags(
   agent?: { model?: string },
 ) {
   return {
-    model: globalFlags.model ?? agent?.model,
+    model: globalFlags.model,
+    ...(agent?.model ? { defaultModel: agent.model } : {}),
     allowedTools: globalFlags.allowedTools,
     maxTurns: globalFlags.maxTurns,
     systemPrompt: globalFlags.systemPrompt,

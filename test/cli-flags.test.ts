@@ -29,6 +29,7 @@ import {
   resolveSessionNameFromFlags,
   resolveSystemPromptFlag,
 } from "../src/cli/flags.js";
+import { sessionCreationModel } from "../src/runtime/engine/session-options.js";
 
 function config(overrides: Partial<ResolvedAcpxConfig> = {}): ResolvedAcpxConfig {
   return {
@@ -590,7 +591,7 @@ test("resolveAgentInvocation reports no model for a built-in or an --agent overr
   );
 });
 
-test("an explicit --model wins over a configured agent model", () => {
+test("a configured agent model travels as a creation-only default", () => {
   const flags = {
     cwd: "/repo",
     nonInteractivePermissions: "deny",
@@ -599,13 +600,27 @@ test("an explicit --model wins over a configured agent model", () => {
   } as const;
   const agent = { model: "agent-model" };
 
-  // explicit flag beats config
-  assert.equal(
-    sessionOptionsFromGlobalFlags({ ...flags, model: "flag-model" }, agent).model,
-    "flag-model",
-  );
-  // agent model is the fallback when no flag was given
-  assert.equal(sessionOptionsFromGlobalFlags(flags, agent).model, "agent-model");
+  // an explicit flag is a request for this invocation; config is only a default
+  const withFlag = sessionOptionsFromGlobalFlags({ ...flags, model: "flag-model" }, agent);
+  assert.equal(withFlag.model, "flag-model");
+  assert.equal(withFlag.defaultModel, "agent-model");
+
+  // without a flag the configured model must not be requested against an
+  // existing session, so it stays out of `model`
+  const withoutFlag = sessionOptionsFromGlobalFlags(flags, agent);
+  assert.equal(withoutFlag.model, undefined);
+  assert.equal(withoutFlag.defaultModel, "agent-model");
+
   // neither set stays undefined
-  assert.equal(sessionOptionsFromGlobalFlags(flags, {}).model, undefined);
+  const neither = sessionOptionsFromGlobalFlags(flags, {});
+  assert.equal(neither.model, undefined);
+  assert.equal(neither.defaultModel, undefined);
+});
+
+test("sessionCreationModel prefers an explicit model over the configured default", () => {
+  assert.equal(sessionCreationModel({ model: "flag", defaultModel: "config" }), "flag");
+  assert.equal(sessionCreationModel({ defaultModel: "config" }), "config");
+  assert.equal(sessionCreationModel({ model: "flag" }), "flag");
+  assert.equal(sessionCreationModel({}), undefined);
+  assert.equal(sessionCreationModel(undefined), undefined);
 });
