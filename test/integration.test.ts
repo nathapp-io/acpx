@@ -1513,6 +1513,63 @@ test("integration: a configured agent model is applied when a session is created
   });
 });
 
+test("integration: a configured agent model is not reapplied to a resumed session", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+
+    try {
+      await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+      await fs.writeFile(
+        path.join(homeDir, ".acpx", "config.json"),
+        `${JSON.stringify(
+          {
+            agents: {
+              codex: {
+                command: `node ${JSON.stringify(MOCK_AGENT_PATH)} --advertise-models --supports-resume-session`,
+                model: "fast-model",
+              },
+            },
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+
+      const resumeSession = async (
+        sessionId: string,
+        extraArgs: string[],
+      ): Promise<string | undefined> => {
+        const result = await runCli(
+          [...extraArgs, "--cwd", cwd, "codex", "sessions", "new", "--resume-session", sessionId],
+          homeDir,
+        );
+        assert.equal(result.code, 0, result.stderr);
+        const record = JSON.parse(
+          await fs.readFile(
+            path.join(homeDir, ".acpx", "sessions", `${encodeURIComponent(sessionId)}.json`),
+            "utf8",
+          ),
+        ) as { acpx?: { current_model_id?: string } };
+        return record.acpx?.current_model_id;
+      };
+
+      assert.notEqual(
+        await resumeSession("cs_configured_default", []),
+        "fast-model",
+        "a configured default must not change the model of a resumed session",
+      );
+      assert.equal(
+        await resumeSession("cs_explicit_flag", ["--model", "fast-model"]),
+        "fast-model",
+        "an explicit --model must still apply to a resumed session",
+      );
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: exec --model fails when agent does not advertise models", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));

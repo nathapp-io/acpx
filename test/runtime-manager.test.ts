@@ -2843,6 +2843,100 @@ function createModelsClientFactory(options: {
   });
 }
 
+function createResumeModelsClientFactory(
+  onSetSessionModel: (sessionId: string, modelId: string) => void,
+): () => FakeClient {
+  const models: SessionModelState = {
+    configId: "model",
+    currentModelId: "sonnet",
+    availableModels: [
+      { modelId: "sonnet", name: "Sonnet" },
+      { modelId: "opus", name: "Opus" },
+    ],
+  };
+  return (): FakeClient => ({
+    initializeResult: {
+      protocolVersion: 1,
+      agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } },
+    },
+    start: async () => {},
+    close: async () => {},
+    createSession: async () => ({
+      sessionId: "fresh-session",
+      agentSessionId: "fresh-agent",
+      models,
+    }),
+    loadSession: async () => ({ agentSessionId: "resumed-agent", models }),
+    resumeSession: async () => ({ agentSessionId: "resumed-agent", models }),
+    hasReusableSession: () => false,
+    supportsLoadSession: () => true,
+    supportsResumeSession: () => true,
+    loadSessionWithOptions: async () => ({ agentSessionId: "resumed-agent" }),
+    getAgentLifecycleSnapshot: () => ({ pid: 1, startedAt: "now", running: true }),
+    prompt: async () => ({ stopReason: "end_turn" }),
+    requestCancelActivePrompt: async () => false,
+    hasActivePrompt: () => false,
+    setSessionMode: async () => {},
+    setSessionConfigOption: async () => {},
+    setSessionModel: async (sessionId: string, modelId: string) => {
+      onSetSessionModel(sessionId, modelId);
+    },
+    clearEventHandlers: () => {},
+    setEventHandlers: () => {},
+  });
+}
+
+test("AcpRuntimeManager applies a configured default model only to a fresh session", async () => {
+  const applied: Array<[string, string]> = [];
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/tmp", sessionStore: new InMemorySessionStore() }),
+    {
+      clientFactory: createResumeModelsClientFactory((sessionId, modelId) => {
+        applied.push([sessionId, modelId]);
+      }) as never,
+    },
+  );
+
+  await manager.ensureSession({
+    sessionKey: "fresh-key",
+    agent: "claude",
+    mode: "persistent",
+    sessionOptions: { defaultModel: "opus" },
+  });
+  assert.deepEqual(applied, [["fresh-session", "opus"]]);
+
+  await manager.ensureSession({
+    sessionKey: "resumed-key",
+    agent: "claude",
+    mode: "persistent",
+    resumeSessionId: "existing-session",
+    sessionOptions: { defaultModel: "opus" },
+  });
+  assert.deepEqual(applied, [["fresh-session", "opus"]]);
+});
+
+test("AcpRuntimeManager applies an explicit model to a resumed session", async () => {
+  const applied: Array<[string, string]> = [];
+  const manager = new AcpRuntimeManager(
+    createRuntimeOptions({ cwd: "/tmp", sessionStore: new InMemorySessionStore() }),
+    {
+      clientFactory: createResumeModelsClientFactory((sessionId, modelId) => {
+        applied.push([sessionId, modelId]);
+      }) as never,
+    },
+  );
+
+  await manager.ensureSession({
+    sessionKey: "resumed-key",
+    agent: "claude",
+    mode: "persistent",
+    resumeSessionId: "existing-session",
+    sessionOptions: { model: "opus", defaultModel: "sonnet" },
+  });
+
+  assert.deepEqual(applied, [["existing-session", "opus"]]);
+});
+
 test("AcpRuntimeManager getStatus surfaces models advertised by the agent", async () => {
   const store = new InMemorySessionStore();
   const manager = new AcpRuntimeManager(
