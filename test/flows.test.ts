@@ -8,6 +8,7 @@ import { TimeoutError } from "../src/async-control.js";
 import { decision, decisionEdge } from "../src/flows/decision.js";
 import { validateFlowDefinition } from "../src/flows/graph.js";
 import { extractJsonObject, parseJsonObject, parseStrictJsonObject } from "../src/flows/json.js";
+import { validateFlowSessionModelPins } from "../src/flows/model-pins.js";
 import { createRunId } from "../src/flows/runtime-support.js";
 import {
   FlowRunner,
@@ -15,12 +16,15 @@ import {
   action,
   checkpoint,
   compute,
+  assertReusableSessionModel,
   defineFlow,
   mergeSessionModel,
   shell,
 } from "../src/flows/runtime.js";
 import type {
   FlowDefinition,
+  FlowRunState,
+  FlowSessionBinding,
   FunctionActionNodeDefinition,
   ShellActionExecution,
   ShellActionNodeDefinition,
@@ -1251,6 +1255,137 @@ test("full flow validation rejects multiple outgoing edges from the same node", 
   );
 });
 
+test("validateFlowDefinition rejects conflicting model pins on a shared session", () => {
+  const flow = defineFlow({
+    name: "conflicting-pins",
+    startAt: "summarize",
+    nodes: {
+      summarize: acp({ model: "gpt-5-mini", prompt: () => "summarize" }),
+      fix: acp({ model: "gpt-5-codex", prompt: () => "fix" }),
+    },
+    edges: [{ from: "summarize", to: "fix" }],
+  });
+
+  assert.throws(
+    () => validateFlowDefinition(flow),
+    /Flow nodes "summarize" and "fix" share session handle "main" but pin different models/,
+  );
+});
+
+test("validateFlowDefinition accepts differing model pins on separate sessions", () => {
+  const isolated = defineFlow({
+    name: "isolated-pins",
+    startAt: "summarize",
+    nodes: {
+      summarize: acp({
+        model: "gpt-5-mini",
+        session: { isolated: true },
+        prompt: () => "summarize",
+      }),
+      fix: acp({ model: "gpt-5-codex", session: { isolated: true }, prompt: () => "fix" }),
+    },
+    edges: [{ from: "summarize", to: "fix" }],
+  });
+  assert.doesNotThrow(() => validateFlowDefinition(isolated));
+
+  const handles = defineFlow({
+    name: "handle-pins",
+    startAt: "summarize",
+    nodes: {
+      summarize: acp({
+        model: "gpt-5-mini",
+        session: { handle: "cheap" },
+        prompt: () => "summarize",
+      }),
+      fix: acp({ model: "gpt-5-codex", session: { handle: "heavy" }, prompt: () => "fix" }),
+    },
+    edges: [{ from: "summarize", to: "fix" }],
+  });
+  assert.doesNotThrow(() => validateFlowDefinition(handles));
+});
+
+test("validateFlowDefinition accepts differing pins on mutually exclusive branches", () => {
+  const flow = defineFlow({
+    name: "branching-pins",
+    startAt: "route",
+    nodes: {
+      route: decision({
+        question: () => "cheap or thorough?",
+        choices: ["cheap", "thorough"] as const,
+      }),
+      cheap: acp({ model: "gpt-5-mini", prompt: () => "cheap" }),
+      thorough: acp({ model: "gpt-5-codex", prompt: () => "thorough" }),
+    },
+    edges: [
+      decisionEdge({
+        from: "route",
+        choices: ["cheap", "thorough"] as const,
+        cases: { cheap: "cheap", thorough: "thorough" },
+      }),
+    ],
+  });
+
+  // Only one branch ever runs, so only one of them creates the shared session.
+  assert.doesNotThrow(() => validateFlowDefinition(flow));
+});
+
+test("the pin preflight rejects a conflict coming from a configured agent model", () => {
+  const flow = defineFlow({
+    name: "agent-model-conflict",
+    startAt: "cheap",
+    nodes: {
+      cheap: acp({ model: "cheap-model", prompt: () => "cheap" }),
+      // No node pin, but its profile resolves to an agent configured for
+      // another model — the same shared session cannot serve both.
+      thorough: acp({ profile: "big", prompt: () => "thorough" }),
+    },
+    edges: [{ from: "cheap", to: "thorough" }],
+  });
+  const resolveAgent = (profile: string | undefined) => ({
+    agentName: profile ?? "default",
+    agentCommand: "same-command",
+    cwd: "/tmp",
+    ...(profile === "big" ? { model: "big-model" } : {}),
+  });
+
+  // Nothing to see without agents resolved: neither node declares a conflict.
+  assert.doesNotThrow(() => validateFlowSessionModelPins(flow));
+
+  assert.throws(
+    () => validateFlowSessionModelPins(flow, resolveAgent),
+    /Flow nodes "cheap" and "thorough" share session handle "main" but pin different models/,
+  );
+});
+
+test("validateFlowDefinition ignores pins on nodes no run can reach", () => {
+  const flow = defineFlow({
+    name: "unreachable-pins",
+    startAt: "start",
+    nodes: {
+      start: compute({ run: () => ({ ok: true }) }),
+      orphan: acp({ model: "gpt-5-mini", prompt: () => "orphan" }),
+      orphanNext: acp({ model: "gpt-5-codex", prompt: () => "orphan next" }),
+    },
+    edges: [{ from: "orphan", to: "orphanNext" }],
+  });
+
+  assert.doesNotThrow(() => validateFlowDefinition(flow));
+});
+
+test("validateFlowDefinition accepts a shared session where only one node pins a model", () => {
+  const flow = defineFlow({
+    name: "single-pin",
+    startAt: "summarize",
+    nodes: {
+      summarize: acp({ model: "gpt-5-mini", prompt: () => "summarize" }),
+      fix: acp({ prompt: () => "fix" }),
+    },
+    edges: [{ from: "summarize", to: "fix" }],
+  });
+
+  assert.doesNotThrow(() => validateFlowDefinition(flow));
+});
+
 test("FlowRunner persists active node state while a shell step is running", async () => {
   await withTempHome(async () => {
     const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-store-"));
@@ -1858,6 +1993,83 @@ test("model precedence is node, then agent, then the global --model", () => {
   assert.equal(mergeSessionModel({}, agentWith, globalOptions).model, "agent-model");
   assert.equal(mergeSessionModel({}, agentWithout, globalOptions).model, "global-model");
   assert.equal(mergeSessionModel({}, agentWithout, undefined).model, undefined);
+});
+
+test("reusing a flow session rejects a model it cannot apply", () => {
+  const state = { currentNode: "fix" } as FlowRunState;
+  const binding = { handle: "main", model: "cheap-model" } as FlowSessionBinding;
+  const agent = { agentName: "a", agentCommand: "c", cwd: "/tmp" };
+
+  // A node pin the shared session cannot honor.
+  assert.throws(
+    () =>
+      assertReusableSessionModel(state, binding, acp({ prompt: () => "", model: "big" }), agent),
+    /needs model "big" but reuses session handle "main", which was created with model "cheap-model"/,
+  );
+
+  // A configured agent model counts too: two profiles can share one session.
+  assert.throws(
+    () =>
+      assertReusableSessionModel(state, binding, acp({ prompt: () => "" }), {
+        ...agent,
+        model: "big",
+      }),
+    /needs model "big"/,
+  );
+
+  // A session created without any model cannot honor a pin either.
+  assert.throws(
+    () =>
+      assertReusableSessionModel(
+        state,
+        { handle: "main", model: null } as FlowSessionBinding,
+        acp({ prompt: () => "", model: "big" }),
+        agent,
+      ),
+    /which was created with no model/,
+  );
+});
+
+test("reusing a flow session allows a model it already runs", () => {
+  const state = { currentNode: "fix" } as FlowRunState;
+  const binding = { handle: "main", model: "cheap-model" } as FlowSessionBinding;
+  const agent = { agentName: "a", agentCommand: "c", cwd: "/tmp" };
+
+  // No pin at all: the node inherits whatever created the session.
+  assert.doesNotThrow(() =>
+    assertReusableSessionModel(state, binding, acp({ prompt: () => "" }), agent),
+  );
+
+  // The run-wide --model is not a pin, so it never conflicts.
+  assert.doesNotThrow(() =>
+    assertReusableSessionModel(
+      state,
+      { handle: "main", model: null } as FlowSessionBinding,
+      acp({ prompt: () => "" }),
+      agent,
+    ),
+  );
+
+  // The same model is not a conflict.
+  assert.doesNotThrow(() =>
+    assertReusableSessionModel(
+      state,
+      binding,
+      acp({ prompt: () => "", model: "cheap-model" }),
+      agent,
+    ),
+  );
+
+  // A binding written before the model field existed says nothing about its
+  // model, so a resumed run keeps working instead of failing on upgrade.
+  assert.doesNotThrow(() =>
+    assertReusableSessionModel(
+      state,
+      { handle: "main" } as FlowSessionBinding,
+      acp({ prompt: () => "", model: "big" }),
+      agent,
+    ),
+  );
 });
 
 test("merging the session model preserves the other session options", () => {

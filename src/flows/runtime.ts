@@ -20,6 +20,7 @@ import type { PermissionPolicy, PromptInput, SessionRecord } from "../types.js";
 import { acp, action, checkpoint, compute, defineFlow, shell } from "./definition.js";
 import { formatShellActionSummary, runShellAction } from "./executors/shell.js";
 import { resolveNext, resolveNextForOutcome, validateFlowDefinition } from "./graph.js";
+import { validateFlowSessionModelPins } from "./model-pins.js";
 import {
   attachStepTrace,
   clearActiveNode,
@@ -147,7 +148,8 @@ type PreparedAcpPrompt = {
  * model, which beats the run-wide --model. Other session options pass through.
  *
  * Applied when a session is created, so an isolated node gets its own model.
- * Nodes sharing a session handle share the model of whichever created it.
+ * An unpinned node sharing a session inherits the model of whichever created
+ * it; conflicting pins on one session are rejected by `model-pins.ts`.
  */
 export function mergeSessionModel(
   node: Pick<AcpNodeDefinition, "model">,
@@ -156,6 +158,36 @@ export function mergeSessionModel(
 ): NonNullable<FlowRunnerOptions["sessionOptions"]> {
   const model = node.model ?? agent.model ?? sessionOptions?.model;
   return { ...sessionOptions, model };
+}
+
+/**
+ * Backstop for the pin conflicts `validateFlowSessionModelPins` cannot see
+ * before the run, such as nodes whose cwd is computed at run time. A node that
+ * reuses a session cannot change its model, so an ignored pin fails loudly.
+ */
+export function assertReusableSessionModel(
+  state: FlowRunState,
+  existing: FlowSessionBinding,
+  node: AcpNodeDefinition,
+  agent: ResolvedFlowAgent,
+): void {
+  // The run-wide --model is deliberately excluded: it is a default for every
+  // step, not a request from this node, so a node that only falls through to it
+  // inherits the session's model rather than conflicting with it.
+  const pinned = node.model ?? agent.model;
+  // `undefined` marks a binding written before this field existed, so its model
+  // is unknown; such a run keeps the old inherit-silently behavior.
+  if (pinned === undefined || existing.model === undefined || pinned === existing.model) {
+    return;
+  }
+  throw new Error(
+    `Flow node "${state.currentNode ?? ""}" needs model "${pinned}" but reuses session handle ` +
+      `"${existing.handle}", which was created with ${
+        existing.model === null ? "no model" : `model "${existing.model}"`
+      }. A model is applied when the shared session is created, so this one would be ignored. ` +
+      "Give the node its own session with `session: { isolated: true }`, " +
+      "or put it on a distinct session handle.",
+  );
 }
 
 export class FlowRunner {
@@ -203,6 +235,16 @@ export class FlowRunner {
     options: { flowPath?: string } = {},
   ): Promise<FlowRunResult> {
     validateFlowDefinition(flow);
+    // Re-run the pin preflight with agents resolved, so a conflict coming from
+    // `agents.<name>.model` also fails before any step runs a side effect.
+    validateFlowSessionModelPins(flow, (profile) => {
+      try {
+        return this.resolveAgent(profile);
+      } catch {
+        // An unresolvable profile is reported by the step that needs it.
+        return undefined;
+      }
+    });
 
     const runId = createRunId(flow.name);
     const runTitle = await resolveFlowRunTitle(flow, input, options.flowPath);
@@ -1070,10 +1112,12 @@ export class FlowRunner {
     const key = createSessionBindingKey(agent.agentCommand, agent.cwd, handle);
     const existing = state.sessionBindings[key];
     if (existing) {
+      assertReusableSessionModel(state, existing, node, agent);
       await this.store.ensureSessionBundle(runDir, state, existing);
       return existing;
     }
 
+    const sessionOptions = mergeSessionModel(node, agent, this.sessionOptions);
     const name = createSessionName(flow.name, handle, agent.cwd, state.runId);
     const created = await createSessionWithClient({
       agentCommand: agent.agentCommand,
@@ -1089,7 +1133,7 @@ export class FlowRunner {
       fs: this.fs,
       timeoutMs,
       verbose: this.verbose,
-      sessionOptions: mergeSessionModel(node, agent, this.sessionOptions),
+      sessionOptions,
     });
 
     const binding: FlowSessionBinding = {
@@ -1102,6 +1146,7 @@ export class FlowRunner {
       agentCommand: agent.agentCommand,
       agentArgv: agent.agentArgv,
       cwd: agent.cwd,
+      model: sessionOptions.model ?? null,
       acpxRecordId: created.record.acpxRecordId,
       acpSessionId: created.record.acpSessionId,
       agentSessionId: created.record.agentSessionId,

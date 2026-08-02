@@ -110,12 +110,21 @@ This lets a flow `action` step (e.g., `git worktree add`) prepare an isolated wo
 ```ts
 summarize: acp({
   model: "gpt-5-mini",
+  session: { isolated: true },
   prompt: ({ task }) => `Summarize in one line: ${task}`,
 }),
 fix: acp({
   model: "gpt-5-codex",
+  session: { isolated: true },
   prompt: ({ task }) => `Implement and verify: ${task}`,
 }),
+```
+
+The `session` option is load-bearing here. `acp` nodes share one session by default, and a model is applied when that session is **created** — so two nodes that share a session cannot run different models. Give each pinned node its own session (`isolated: true`) or a distinct `handle`. A flow that pins different models on one shared session is rejected before it runs:
+
+```text
+error: Flow nodes "summarize" and "fix" share session handle "main" but pin
+       different models ("gpt-5-mini" vs "gpt-5-codex"). …
 ```
 
 Precedence for a step, most specific first:
@@ -126,7 +135,7 @@ Precedence for a step, most specific first:
 
 Note this is the inverse of the plain CLI, where `--model` beats the configured agent model. In a flow, `--model` is a default for the whole run and a node or agent pin is the more specific signal.
 
-The model is applied when a session is created. A node that runs in its own session gets its own model; nodes that share a session handle share the model of whichever node created that session.
+An unpinned node that shares a session inherits the model of whichever node created it — that is allowed, since it is asking for no particular model.
 
 ## Permissions
 
