@@ -1,3 +1,4 @@
+import { validateFlowSessionModelPins } from "./model-pins.js";
 import { assertValidFlowDefinitionShape } from "./schema.js";
 import type { FlowDefinition, FlowEdge, FlowNodeResult } from "./types.js";
 
@@ -6,6 +7,7 @@ export function validateFlowDefinition(flow: FlowDefinition): void {
   if (!flow.nodes[flow.startAt]) {
     throw new Error(`Flow start node is missing: ${flow.startAt}`);
   }
+  validateFlowSessionModelPins(flow);
 
   const outgoingEdges = new Set<string>();
   for (const edge of flow.edges) {

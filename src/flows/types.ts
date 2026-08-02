@@ -244,6 +244,12 @@ export type FlowSessionBinding = {
   agentCommand: string;
   agentArgv?: string[];
   cwd: string;
+  /**
+   * Model this session was created with. `null` records that it was created
+   * without one; absent means the binding predates this field and nothing can
+   * be concluded about its model.
+   */
+  model?: string | null;
   acpxRecordId: string;
   acpSessionId: string;
   agentSessionId?: string;
