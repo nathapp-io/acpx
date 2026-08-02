@@ -124,7 +124,7 @@ acpx --model gpt-5 codex 'do the thing'
 
 An explicit `--model` always overrides the configured value — the flag is a per-invocation instruction, so config must not silently take it back. Inside a flow the precedence is inverted, because there `--model` is a run-wide default rather than a per-step one; see [Flows](flows.md#model-selection).
 
-The configured model seeds a session when it is **created**. It is never reapplied to an existing session, so a model you select on a live session with `set model` survives later prompts:
+The configured model seeds a session when it is **created**. It is never reapplied to an existing session — including one adopted with `--resume-session` — so a model you select on a live session with `set model` survives later prompts:
 
 ```bash
 acpx codex sessions new        # starts on agents.codex.model

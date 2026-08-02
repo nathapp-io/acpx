@@ -40,6 +40,7 @@ type CreatedSessionState = {
   agentSessionId: string | undefined;
   sessionResult: Awaited<ReturnType<AcpClient["createSession" | "loadSession"]>>;
   sessionModels: SessionCreateResult["models"];
+  requestedModel: string | undefined;
   requestedModelApplied: boolean;
   requestedModelResponse?: Awaited<ReturnType<AcpClient["setSessionModel"]>>;
 };
@@ -82,17 +83,13 @@ async function createSessionRecordWithClient(
   };
 
   persistSessionOptions(record, options.sessionOptions);
-  applyCreatedSessionModelState(record, createdState, sessionCreationModel(options.sessionOptions));
+  applyCreatedSessionModelState(record, createdState);
 
   await writeSessionRecord(record);
   return record;
 }
 
-function applyCreatedSessionModelState(
-  record: SessionRecord,
-  state: CreatedSessionState,
-  requestedModel: string | undefined,
-): void {
+function applyCreatedSessionModelState(record: SessionRecord, state: CreatedSessionState): void {
   applyConfigOptionsToRecord(record, state.sessionResult);
   applyConfigOptionsToRecord(record, state.requestedModelResponse);
   syncAdvertisedModelState(
@@ -104,7 +101,7 @@ function applyCreatedSessionModelState(
   if (state.requestedModelApplied) {
     setCurrentModelId(
       record,
-      currentModelIdFromSetModelResponse(state.requestedModelResponse, requestedModel),
+      currentModelIdFromSetModelResponse(state.requestedModelResponse, state.requestedModel),
     );
   }
 }
@@ -115,10 +112,11 @@ async function createFreshSessionState(
   cwd: string,
 ): Promise<CreatedSessionState> {
   const createdSession = await withTimeout(client.createSession(cwd), options.timeoutMs);
+  const requestedModel = sessionCreationModel(options.sessionOptions);
   const modelApplication = await applyRequestedModelIfAdvertised({
     client,
     sessionId: createdSession.sessionId,
-    requestedModel: sessionCreationModel(options.sessionOptions),
+    requestedModel,
     models: createdSession.models,
     agentCommand: options.agentCommand,
     timeoutMs: options.timeoutMs,
@@ -129,6 +127,7 @@ async function createFreshSessionState(
     agentSessionId: normalizeRuntimeSessionId(createdSession.agentSessionId),
     sessionResult: createdSession,
     sessionModels: createdSession.models,
+    requestedModel,
     requestedModelApplied: modelApplication.applied,
     requestedModelResponse: modelApplication.response,
   };
@@ -161,10 +160,14 @@ async function resumeSessionRecordWithClient(
       options.timeoutMs,
     );
     const sessionModels = resumedSession.models;
+    // A resumed ACP session already exists, so only an explicit `model` may
+    // change it. A configured default seeds creation alone; reapplying it here
+    // would take back a model the user selected with `set model`.
+    const requestedModel = options.sessionOptions?.model;
     const modelApplication = await applyRequestedModelIfAdvertised({
       client,
       sessionId: options.resumeSessionId,
-      requestedModel: sessionCreationModel(options.sessionOptions),
+      requestedModel,
       models: sessionModels,
       agentCommand: options.agentCommand,
       timeoutMs: options.timeoutMs,
@@ -175,6 +178,7 @@ async function resumeSessionRecordWithClient(
       agentSessionId: normalizeRuntimeSessionId(resumedSession.agentSessionId),
       sessionResult: resumedSession,
       sessionModels,
+      requestedModel,
       requestedModelApplied: modelApplication.applied,
       requestedModelResponse: modelApplication.response,
     };

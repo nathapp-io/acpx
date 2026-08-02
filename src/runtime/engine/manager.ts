@@ -443,6 +443,8 @@ type CreatedRuntimeSession = {
   sessionResult:
     | Awaited<ReturnType<AcpClient["createSession"]>>
     | Awaited<ReturnType<AcpClient["loadSession"]>>;
+  /** True when the ACP session already existed and was resumed or loaded. */
+  resumed: boolean;
 };
 
 type RuntimeTurnTaskState = {
@@ -541,6 +543,7 @@ async function createOrLoadRuntimeSession(
         sessionId: resumeSessionId,
         agentSessionId: resumed.agentSessionId,
         sessionResult: resumed,
+        resumed: true,
       };
     }
     if (!client.supportsLoadSession()) {
@@ -553,6 +556,7 @@ async function createOrLoadRuntimeSession(
       sessionId: resumeSessionId,
       agentSessionId: loaded.agentSessionId,
       sessionResult: loaded,
+      resumed: true,
     };
   }
 
@@ -561,6 +565,7 @@ async function createOrLoadRuntimeSession(
     sessionId: created.sessionId,
     agentSessionId: created.agentSessionId,
     sessionResult: created,
+    resumed: false,
   };
 }
 
@@ -770,10 +775,15 @@ export class AcpRuntimeManager {
     record.protocolVersion = client.initializeResult?.protocolVersion;
     record.agentCapabilities = client.initializeResult?.agentCapabilities;
     applyConfigOptionsToRecord(record, session.sessionResult);
+    // A resumed or loaded ACP session already exists, so only an explicit
+    // `model` may change it; a configured default seeds creation alone.
+    const requestedModel = session.resumed
+      ? input.sessionOptions?.model
+      : sessionCreationModel(input.sessionOptions);
     const modelApplication = await applyRequestedModelIfAdvertised({
       client,
       sessionId: session.sessionId,
-      requestedModel: sessionCreationModel(input.sessionOptions),
+      requestedModel,
       models: session.sessionResult.models,
       agentCommand,
       timeoutMs: this.options.timeoutMs,
@@ -788,10 +798,7 @@ export class AcpRuntimeManager {
     if (modelApplication.applied) {
       setCurrentModelId(
         record,
-        currentModelIdFromSetModelResponse(
-          modelApplication.response,
-          sessionCreationModel(input.sessionOptions),
-        ),
+        currentModelIdFromSetModelResponse(modelApplication.response, requestedModel),
       );
     }
     applyLifecycleSnapshotToRecord(record, client.getAgentLifecycleSnapshot());
