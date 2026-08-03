@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AcpClient } from "../acp/client.js";
 import { InterruptedError, TimeoutError, withInterrupt, withTimeout } from "../async-control.js";
 import { promptToDisplayText } from "../prompt-content.js";
+import { sessionCreationModel } from "../runtime/engine/session-options.js";
 import {
   cloneSessionAcpxState,
   createSessionConversation,
@@ -150,14 +151,26 @@ type PreparedAcpPrompt = {
  * Applied when a session is created, so an isolated node gets its own model.
  * An unpinned node sharing a session inherits the model of whichever created
  * it; conflicting pins on one session are rejected by `model-pins.ts`.
+ *
+ * A configured `agents.<name>.model` travels as `defaultModel` rather than
+ * `model`, because `model` is persisted with the session record and requested
+ * again on every later prompt: a flow node reconnecting to a shared session
+ * would take back the model that session already runs. `defaultModel` is not
+ * persisted and seeds creation alone, matching the CLI contract. It also
+ * clears the run-wide `--model`, which flow precedence ranks below it.
  */
 export function mergeSessionModel(
   node: Pick<AcpNodeDefinition, "model">,
   agent: ResolvedFlowAgent,
   sessionOptions: FlowRunnerOptions["sessionOptions"],
 ): NonNullable<FlowRunnerOptions["sessionOptions"]> {
-  const model = node.model ?? agent.model ?? sessionOptions?.model;
-  return { ...sessionOptions, model };
+  if (node.model !== undefined) {
+    return { ...sessionOptions, model: node.model, defaultModel: undefined };
+  }
+  if (agent.model !== undefined) {
+    return { ...sessionOptions, model: undefined, defaultModel: agent.model };
+  }
+  return { ...sessionOptions };
 }
 
 /**
@@ -1146,7 +1159,9 @@ export class FlowRunner {
       agentCommand: agent.agentCommand,
       agentArgv: agent.agentArgv,
       cwd: agent.cwd,
-      model: sessionOptions.model ?? null,
+      // The model the session was actually created with, whichever channel it
+      // arrived through, so the shared-session pin guard still sees it.
+      model: sessionCreationModel(sessionOptions) ?? null,
       acpxRecordId: created.record.acpxRecordId,
       acpSessionId: created.record.acpSessionId,
       agentSessionId: created.record.agentSessionId,

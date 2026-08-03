@@ -30,6 +30,7 @@ import type {
   ShellActionNodeDefinition,
 } from "../src/flows/runtime.js";
 import { flowRunsBaseDir } from "../src/flows/store.js";
+import { sessionCreationModel } from "../src/runtime/engine/session-options.js";
 import type { PromptInput } from "../src/types.js";
 
 const MOCK_AGENT_PATH = fileURLToPath(new URL("./mock-agent.js", import.meta.url));
@@ -1987,12 +1988,59 @@ test("model precedence is node, then agent, then the global --model", () => {
   const agentWithout = { agentName: "a", agentCommand: "c", cwd: "/tmp" };
 
   assert.equal(
-    mergeSessionModel({ model: "node-model" }, agentWith, globalOptions).model,
+    sessionCreationModel(mergeSessionModel({ model: "node-model" }, agentWith, globalOptions)),
     "node-model",
   );
-  assert.equal(mergeSessionModel({}, agentWith, globalOptions).model, "agent-model");
-  assert.equal(mergeSessionModel({}, agentWithout, globalOptions).model, "global-model");
-  assert.equal(mergeSessionModel({}, agentWithout, undefined).model, undefined);
+  assert.equal(
+    sessionCreationModel(mergeSessionModel({}, agentWith, globalOptions)),
+    "agent-model",
+  );
+  assert.equal(
+    sessionCreationModel(mergeSessionModel({}, agentWithout, globalOptions)),
+    "global-model",
+  );
+  assert.equal(sessionCreationModel(mergeSessionModel({}, agentWithout, undefined)), undefined);
+});
+
+test("a configured agent model stays a creation-only default in flows", () => {
+  const merged = mergeSessionModel(
+    {},
+    { agentName: "a", agentCommand: "c", cwd: "/tmp", model: "agent-model" },
+    { model: "global-model" },
+  );
+
+  // Never an explicit `model`: that is persisted with the session record and
+  // re-requested on every later prompt, so a reconnecting flow node would take
+  // back the model the session already runs.
+  assert.equal(merged.model, undefined);
+  assert.equal(merged.defaultModel, "agent-model");
+  // The run-wide --model is cleared rather than left to outrank the agent
+  // entry, since flow precedence ranks the agent entry above it.
+  assert.equal(sessionCreationModel(merged), "agent-model");
+});
+
+test("a flow node pin stays an explicit model", () => {
+  const merged = mergeSessionModel(
+    { model: "node-model" },
+    { agentName: "a", agentCommand: "c", cwd: "/tmp", model: "agent-model" },
+    { model: "global-model" },
+  );
+
+  // A node pin is a request from this node, not a configured default, and the
+  // shared-session guard already rejects a pin the session cannot honor.
+  assert.equal(merged.model, "node-model");
+  assert.equal(merged.defaultModel, undefined);
+});
+
+test("the run-wide --model passes through unchanged", () => {
+  const merged = mergeSessionModel(
+    {},
+    { agentName: "a", agentCommand: "c", cwd: "/tmp" },
+    { model: "global-model" },
+  );
+
+  assert.equal(merged.model, "global-model");
+  assert.equal(merged.defaultModel, undefined);
 });
 
 test("reusing a flow session rejects a model it cannot apply", () => {
