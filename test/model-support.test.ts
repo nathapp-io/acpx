@@ -59,6 +59,33 @@ test("non-Claude model validation rejects unadvertised selectors", () => {
   }, /did not advertise that model/);
 });
 
+test("model validation does not blame --model for a model it was not given", () => {
+  // The requested model can come from `agents.<name>.model` or a flow node pin
+  // with no flag in sight, so naming the flag points users at the wrong knob.
+  const advertised = {
+    configId: "model",
+    currentModelId: "default",
+    availableModels: [{ modelId: "default", name: "Default" }],
+  };
+  for (const models of [undefined, advertised]) {
+    assert.throws(
+      () =>
+        assertRequestedModelSupported({
+          requestedModel: "configured-model",
+          models,
+          agentCommand: "mock-agent",
+          context: "apply",
+        }),
+      (error: unknown) => {
+        assert(error instanceof Error);
+        assert.match(error.message, /Cannot apply model "configured-model"/);
+        assert.doesNotMatch(error.message, /--model/);
+        return true;
+      },
+    );
+  }
+});
+
 test("model validation distinguishes missing model capability", () => {
   assert.throws(
     () =>
