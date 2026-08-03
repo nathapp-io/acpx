@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { AcpClient } from "../acp/client.js";
+import { sessionCreationModel } from "../acp/session-model.js";
 import { InterruptedError, TimeoutError, withInterrupt, withTimeout } from "../async-control.js";
 import { promptToDisplayText } from "../prompt-content.js";
-import { sessionCreationModel } from "../runtime/engine/session-options.js";
 import {
   cloneSessionAcpxState,
   createSessionConversation,

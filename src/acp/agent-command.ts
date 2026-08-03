@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { CopilotAcpUnsupportedError } from "../errors.js";
-import { sessionCreationModel } from "../runtime/engine/session-options.js";
 import {
   buildSpawnCommandOptions,
   readWindowsEnvValue,
@@ -8,6 +7,7 @@ import {
 } from "../spawn-command-options.js";
 import { type AcpClientOptions } from "../types.js";
 import { basenameToken, splitCommandLine } from "./client-process.js";
+import { sessionCreationModel } from "./session-model.js";
 
 const DEFAULT_AGENT_CLOSE_AFTER_STDIN_END_MS = 100;
 const QODER_AGENT_CLOSE_AFTER_STDIN_END_MS = 750;
