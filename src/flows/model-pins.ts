@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { AcpNodeDefinition, FlowDefinition, FlowEdge, ResolvedFlowAgent } from "./types.js";
 
 type PinnedNode = { nodeId: string; model: string };
@@ -62,12 +63,24 @@ function sessionModelPin(
   return model === undefined ? undefined : { group: sessionGroupKey(node, agent), model };
 }
 
-/** Identity of the session this node would bind to, as far as it is knowable. */
+/**
+ * Identity of the session this node would bind to, as far as it is knowable.
+ *
+ * The cwd is resolved the way `resolveNodeCwd` resolves it at run time, so
+ * equivalent spellings — `.` and the agent's own absolute cwd, say — group
+ * together. Comparing the raw strings would file them as separate sessions and
+ * let the first ACP step run before the runtime guard rejected the second.
+ *
+ * Without a resolved agent there is no base to resolve against, so the raw
+ * value is kept: definition-level validation cannot know where a relative cwd
+ * lands. The runner preflight passes a resolver, so real conflicts are still
+ * caught before any step runs.
+ */
 function sessionGroupKey(node: AcpNodeDefinition, agent: ResolvedFlowAgent | undefined): string {
   const handle = node.session?.handle ?? "main";
   const nodeCwd = typeof node.cwd === "string" ? node.cwd : undefined;
   return agent
-    ? JSON.stringify([agent.agentCommand, nodeCwd ?? agent.cwd, handle])
+    ? JSON.stringify([agent.agentCommand, path.resolve(agent.cwd, nodeCwd ?? agent.cwd), handle])
     : JSON.stringify([node.profile ?? "", nodeCwd ?? "", handle]);
 }
 
