@@ -41,13 +41,7 @@ export function mergeSessionOptions(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
-/**
- * Model to request while creating a session: an explicit `model` first, then a
- * configured default. Existing-session paths use `model` alone.
- */
-export function sessionCreationModel(options: SessionAgentOptions | undefined): string | undefined {
-  return options?.model ?? options?.defaultModel;
-}
+export { sessionCreationModel } from "../../acp/session-model.js";
 
 function mergeEnvRecords(
   fallback: Record<string, string> | undefined,

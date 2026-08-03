@@ -216,6 +216,12 @@ export type AcpClientOptions = {
   verbose?: boolean;
   sessionOptions?: {
     model?: string;
+    /**
+     * Model used when the session is created and no explicit `model` was
+     * requested. Only session-creation paths read it, so a configured default
+     * cannot take back a model selected on a live session.
+     */
+    defaultModel?: string;
     allowedTools?: string[];
     maxTurns?: number;
     systemPrompt?: string | { append: string };
