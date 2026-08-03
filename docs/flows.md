@@ -137,6 +137,8 @@ Note this is the inverse of the plain CLI, where `--model` beats the configured 
 
 An unpinned node that shares a session inherits the model of whichever node created it — that is allowed, since it is asking for no particular model.
 
+As on the CLI, `agents.<name>.model` seeds a session only when it is created. A later node reconnecting to a session it shares does not re-request it, so the session keeps the model it is actually running.
+
 ## Permissions
 
 Flows can declare an explicit permission requirement. If a flow needs `approve-all` and you forget the flag, `acpx` fails fast before the first step runs and prints the flag to add:

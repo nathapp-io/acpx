@@ -1570,6 +1570,142 @@ test("integration: a configured agent model is not reapplied to a resumed sessio
   });
 });
 
+test("integration: a configured agent model is not reapplied when a flow session reconnects", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-model-cwd-"));
+    const flowDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-model-"));
+    const flowPath = path.join(flowDir, "shared-session-model.flow.ts");
+
+    try {
+      await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+      await fs.writeFile(
+        path.join(homeDir, ".acpx", "config.json"),
+        `${JSON.stringify(
+          {
+            agents: {
+              // `--report-model-as` keeps the session's current model different
+              // from the configured one, so a default that survives into the
+              // per-prompt path is re-requested on every reconnect instead of
+              // being skipped as already-current.
+              codex: {
+                command: `node ${JSON.stringify(MOCK_AGENT_PATH)} --supports-load-session --advertise-models --report-model-as fast-model`,
+                model: "smart-model",
+              },
+            },
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+
+      // Both nodes share the default "main" session, so the second prompt runs
+      // against a session that has to be reconnected.
+      await fs.writeFile(
+        flowPath,
+        [
+          'import { acp, defineFlow } from "acpx/flows";',
+          "",
+          "export default defineFlow({",
+          '  name: "shared-session-model",',
+          '  startAt: "first",',
+          "  nodes: {",
+          "    first: acp({",
+          '      prompt: () => "echo first",',
+          "      parse: (text) => ({ reply: text }),",
+          "    }),",
+          "    second: acp({",
+          '      prompt: () => "echo second",',
+          "      parse: (text) => ({ reply: text }),",
+          "    }),",
+          "  },",
+          '  edges: [{ from: "first", to: "second" }],',
+          "});",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = await runCli(
+        [
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "flow",
+          "run",
+          flowPath,
+          "--default-agent",
+          "codex",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const runDir = await waitForFlowRunDir(
+        path.join(homeDir, ".acpx", "flows", "runs"),
+        "shared-session-model",
+      );
+
+      const live = JSON.parse(
+        await fs.readFile(path.join(runDir, "projections", "live.json"), "utf8"),
+      ) as { sessionBindings?: Record<string, { bundleId?: string; model?: string | null }> };
+      const bindings = Object.values(live.sessionBindings ?? {});
+      assert.equal(bindings.length, 1, "expected both nodes to share one session");
+
+      // The binding still records the model the session was created with, so
+      // the shared-session pin guard keeps working for configured models.
+      assert.equal(bindings[0]?.model, "smart-model");
+
+      const events = (
+        await fs.readFile(
+          path.join(runDir, "sessions", `${bindings[0]?.bundleId}`, "events.ndjson"),
+          "utf8",
+        )
+      )
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as { message?: { method?: string; params?: unknown } });
+
+      // Session creation happens before the store is wired to this session's
+      // event log, so every model request recorded here belongs to a prompt.
+      const modelRequests = events.filter(
+        (event) =>
+          event.message?.method === "session/set_config_option" &&
+          (event.message.params as { configId?: unknown } | undefined)?.configId === "model",
+      );
+      assert.equal(
+        modelRequests.length,
+        0,
+        `a configured model must not be re-requested by a flow prompt, got ${modelRequests.length} requests`,
+      );
+
+      // The mechanism behind the re-request: an explicit `model` is persisted
+      // with the session record, reloaded on reconnect, and sent again. A
+      // creation-only default is never written there.
+      const sessionFiles = await fs.readdir(path.join(homeDir, ".acpx", "sessions"));
+      const records = await Promise.all(
+        sessionFiles
+          .filter((name) => name.endsWith(".json") && name !== "index.json")
+          .map(
+            async (name) =>
+              JSON.parse(
+                await fs.readFile(path.join(homeDir, ".acpx", "sessions", name), "utf8"),
+              ) as { acpx?: { session_options?: { model?: string } } },
+          ),
+      );
+      assert(records.length > 0, "expected the flow to leave a session record");
+      for (const record of records) {
+        assert.equal(record.acpx?.session_options?.model, undefined);
+      }
+    } finally {
+      await fs.rm(flowDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: exec --model fails when agent does not advertise models", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
