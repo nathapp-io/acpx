@@ -1513,6 +1513,50 @@ test("integration: a configured agent model is applied when a session is created
   });
 });
 
+test("integration: a configured agent model is sent as session-creation metadata", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
+    const fakeBinDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-fake-claude-"));
+
+    try {
+      // A Claude ACP adapter that advertises no model list: session-creation
+      // metadata is the only channel left, since `assertRequestedModelSupported`
+      // deliberately lets this adapter through without a config option.
+      const fakeClaude = await writeFakeClaudeAgent(fakeBinDir);
+      await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+      await fs.writeFile(
+        path.join(homeDir, ".acpx", "config.json"),
+        `${JSON.stringify(
+          { agents: { claude: { command: fakeClaude, model: "fast-model" } } },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+
+      const result = await runCli(
+        ["--approve-all", "--cwd", cwd, "--format", "json", "claude", "exec", "echo hello"],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const payloads = parseJsonRpcOutputLines(result.stdout);
+      const createRequest = payloads.find((payload) => payload.method === "session/new") as
+        | { params?: { _meta?: { claudeCode?: { options?: { model?: string } } } } }
+        | undefined;
+      assert(createRequest, "expected session/new request");
+      assert.equal(
+        createRequest.params?._meta?.claudeCode?.options?.model,
+        "fast-model",
+        "a configured model must reach session-creation metadata, as --model does",
+      );
+    } finally {
+      await fs.rm(fakeBinDir, { recursive: true, force: true });
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 test("integration: a configured agent model is not reapplied to a resumed session", async () => {
   await withTempHome(async (homeDir) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-integration-cwd-"));
@@ -1565,6 +1609,91 @@ test("integration: a configured agent model is not reapplied to a resumed sessio
         "an explicit --model must still apply to a resumed session",
       );
     } finally {
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("integration: a configured agent model is applied when a flow creates its session", async () => {
+  await withTempHome(async (homeDir) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-create-cwd-"));
+    const flowDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-flow-create-"));
+    const flowPath = path.join(flowDir, "created-session-model.flow.ts");
+
+    try {
+      await fs.mkdir(path.join(homeDir, ".acpx"), { recursive: true });
+      await fs.writeFile(
+        path.join(homeDir, ".acpx", "config.json"),
+        `${JSON.stringify(
+          {
+            agents: {
+              codex: {
+                command: `node ${JSON.stringify(MOCK_AGENT_PATH)} --advertise-models`,
+                model: "smart-model",
+              },
+            },
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+
+      // One node, so the session is created and prompted on the same client:
+      // whatever model the record ends on is the one creation established.
+      await fs.writeFile(
+        flowPath,
+        [
+          'import { acp, defineFlow } from "acpx/flows";',
+          "",
+          "export default defineFlow({",
+          '  name: "created-session-model",',
+          '  startAt: "only",',
+          "  nodes: {",
+          "    only: acp({",
+          '      prompt: () => "echo only",',
+          "      parse: (text) => ({ reply: text }),",
+          "    }),",
+          "  },",
+          "  edges: [],",
+          "});",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = await runCli(
+        [
+          "--approve-all",
+          "--cwd",
+          cwd,
+          "--format",
+          "json",
+          "flow",
+          "run",
+          flowPath,
+          "--default-agent",
+          "codex",
+        ],
+        homeDir,
+      );
+      assert.equal(result.code, 0, result.stderr);
+
+      const runDir = await waitForFlowRunDir(
+        path.join(homeDir, ".acpx", "flows", "runs"),
+        "created-session-model",
+      );
+      const live = JSON.parse(
+        await fs.readFile(path.join(runDir, "projections", "live.json"), "utf8"),
+      ) as { sessionBindings?: Record<string, { bundleId?: string }> };
+      const bundleId = Object.values(live.sessionBindings ?? {})[0]?.bundleId;
+      const record = JSON.parse(
+        await fs.readFile(path.join(runDir, "sessions", `${bundleId}`, "record.json"), "utf8"),
+      ) as { acpx?: { current_model_id?: string } };
+
+      assert.equal(record.acpx?.current_model_id, "smart-model");
+    } finally {
+      await fs.rm(flowDir, { recursive: true, force: true });
       await fs.rm(cwd, { recursive: true, force: true });
     }
   });

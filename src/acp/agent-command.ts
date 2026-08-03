@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { CopilotAcpUnsupportedError } from "../errors.js";
+import { sessionCreationModel } from "../runtime/engine/session-options.js";
 import {
   buildSpawnCommandOptions,
   readWindowsEnvValue,
@@ -334,8 +335,14 @@ function assignClaudeCodeOptions(
   target: Record<string, unknown>,
   options: NonNullable<AcpClientOptions["sessionOptions"]>,
 ): void {
-  if (typeof options.model === "string" && options.model.trim().length > 0) {
-    target.model = options.model;
+  // A configured `agents.<name>.model` counts here as much as an explicit
+  // `--model`: this metadata rides on `session/new` alone, so it is a
+  // creation-only channel by construction and cannot take back the model of a
+  // session that already exists. For an adapter that advertises no model
+  // config option it is the only channel there is.
+  const model = sessionCreationModel(options);
+  if (typeof model === "string" && model.trim().length > 0) {
+    target.model = model;
   }
   if (Array.isArray(options.allowedTools)) {
     target.allowedTools = [...options.allowedTools];
