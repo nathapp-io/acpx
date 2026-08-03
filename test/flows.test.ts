@@ -1358,6 +1358,52 @@ test("the pin preflight rejects a conflict coming from a configured agent model"
   );
 });
 
+test("the pin preflight resolves a node cwd the way the runtime does", () => {
+  // The runtime binds a session under `path.resolve(agent.cwd, node.cwd)`, so
+  // these two nodes land on one session. Comparing the raw strings would file
+  // them under different sessions and let the first step run before the
+  // runtime guard rejects the second.
+  const flow = defineFlow({
+    name: "equivalent-cwd-conflict",
+    startAt: "cheap",
+    nodes: {
+      cheap: acp({ model: "cheap-model", cwd: ".", prompt: () => "cheap" }),
+      thorough: acp({ model: "big-model", cwd: "/tmp", prompt: () => "thorough" }),
+    },
+    edges: [{ from: "cheap", to: "thorough" }],
+  });
+  const resolveAgent = () => ({
+    agentName: "default",
+    agentCommand: "same-command",
+    cwd: "/tmp",
+  });
+
+  assert.throws(
+    () => validateFlowSessionModelPins(flow, resolveAgent),
+    /Flow nodes "cheap" and "thorough" share session handle "main" but pin different models/,
+  );
+});
+
+test("the pin preflight keeps genuinely different cwds apart", () => {
+  const flow = defineFlow({
+    name: "distinct-cwd",
+    startAt: "cheap",
+    nodes: {
+      cheap: acp({ model: "cheap-model", cwd: "one", prompt: () => "cheap" }),
+      thorough: acp({ model: "big-model", cwd: "two", prompt: () => "thorough" }),
+    },
+    edges: [{ from: "cheap", to: "thorough" }],
+  });
+  const resolveAgent = () => ({
+    agentName: "default",
+    agentCommand: "same-command",
+    cwd: "/tmp",
+  });
+
+  // Separate sessions, so separate models are fine.
+  assert.doesNotThrow(() => validateFlowSessionModelPins(flow, resolveAgent));
+});
+
 test("validateFlowDefinition ignores pins on nodes no run can reach", () => {
   const flow = defineFlow({
     name: "unreachable-pins",
