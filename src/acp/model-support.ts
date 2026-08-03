@@ -241,7 +241,7 @@ export function assertRequestedModelSupported(params: {
     if (supportsLegacyClaudeCodeModelMetadata(params.agentCommand)) {
       return undefined;
     }
-    const action = params.context === "replay" ? "replay saved model" : "apply --model";
+    const action = params.context === "replay" ? "replay saved model" : "apply model";
     throw new RequestedModelUnsupportedError(
       `Cannot ${action} "${params.requestedModel}": the ACP agent did not advertise model support through a session config option or legacy models metadata, and the adapter does not support a startup model flag.`,
       "missing-capability",
@@ -257,7 +257,7 @@ export function assertRequestedModelSupported(params: {
     if (supportsLegacyClaudeCodeModelMetadata(params.agentCommand)) {
       return `requested model "${params.requestedModel}" was not in the Claude ACP advertised model list (${formatAvailableModelIds(params.models)}); forwarding it to Claude Code so the adapter can accept or reject it.`;
     }
-    const action = params.context === "replay" ? "replay saved model" : "apply --model";
+    const action = params.context === "replay" ? "replay saved model" : "apply model";
     throw new RequestedModelUnsupportedError(
       `Cannot ${action} "${params.requestedModel}": the ACP agent did not advertise that model. Available models: ${formatAvailableModelIds(params.models)}.`,
       "unadvertised-model",
