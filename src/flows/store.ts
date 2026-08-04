@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { AcpJsonRpcMessage, AcpMessageDirection, SessionRecord } from "../types.js";
+import { normalizeModelPin } from "./model-pins.js";
 import type {
   AcpNodeDefinition,
   FlowArtifactRef,
@@ -460,10 +461,11 @@ function snapshotAcpNode(
   node: Extract<FlowNodeDefinition, { nodeType: "acp" }>,
   common: ReturnType<typeof snapshotCommonNodeFields>,
 ): FlowDefinitionSnapshot["nodes"][string] {
+  const model = normalizeModelPin(node.model);
   return {
     ...common,
     ...(node.profile ? { profile: node.profile } : {}),
-    ...(node.model ? { model: node.model } : {}),
+    ...(model ? { model } : {}),
     session: {
       ...(node.session?.handle ? { handle: node.session.handle } : {}),
       ...(node.session?.isolated ? { isolated: true } : {}),

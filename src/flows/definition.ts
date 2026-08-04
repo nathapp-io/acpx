@@ -27,8 +27,7 @@ export function acp(definition: Omit<AcpNodeDefinition, "nodeType">): AcpNodeDef
     nodeType: "acp",
     ...definition,
   };
-  assertValidAcpNodeDefinition(node);
-  return node;
+  return assertValidAcpNodeDefinition(node);
 }
 
 export function compute(

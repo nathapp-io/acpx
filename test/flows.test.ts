@@ -2028,6 +2028,38 @@ test("acp node model must be a non-empty string", () => {
   );
 });
 
+test("acp node model is trimmed of surrounding whitespace", () => {
+  // A padded model must reach session creation normalized, same as CLI flags
+  // and configured agent models, or a matching adapter can reject it.
+  const node = acp({ prompt: () => "", model: " gpt-5 " });
+  assert.equal(node.model, "gpt-5");
+});
+
+test("mergeSessionModel trims a padded node model", () => {
+  // A node authored as a plain object literal (bypassing acp()) is only
+  // validated as non-blank-when-trimmed, not trimmed, so the boundary that
+  // actually creates the session must normalize it too.
+  const agentWithout = { agentName: "a", agentCommand: "c", cwd: "/tmp" };
+  assert.equal(
+    sessionCreationModel(mergeSessionModel({ model: " gpt-5 " }, agentWithout, undefined)),
+    "gpt-5",
+  );
+});
+
+test("validateFlowDefinition treats padded and unpadded spellings of one model as equal", () => {
+  const flow = defineFlow({
+    name: "padded-pins",
+    startAt: "summarize",
+    nodes: {
+      summarize: { nodeType: "acp", model: " gpt-5 ", prompt: () => "summarize" },
+      fix: acp({ model: "gpt-5", prompt: () => "fix" }),
+    },
+    edges: [{ from: "summarize", to: "fix" }],
+  });
+
+  assert.doesNotThrow(() => validateFlowDefinition(flow));
+});
+
 test("model precedence is node, then agent, then the global --model", () => {
   const globalOptions = { model: "global-model" };
   const agentWith = { agentName: "a", agentCommand: "c", cwd: "/tmp", model: "agent-model" };
