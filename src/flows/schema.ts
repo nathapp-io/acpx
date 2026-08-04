@@ -139,7 +139,7 @@ export function assertValidFlowDefinitionShape(flow: FlowDefinition): void {
 }
 
 export function assertValidAcpNodeDefinition(node: AcpNodeDefinition): AcpNodeDefinition {
-  return parseWithSchema("acp node definition", acpNodeSchema, node) as AcpNodeDefinition;
+  return parseWithSchema("acp node definition", acpNodeSchema, node);
 }
 
 export function assertValidComputeNodeDefinition(node: ComputeNodeDefinition): void {
