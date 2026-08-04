@@ -4,6 +4,19 @@ import type { AcpNodeDefinition, FlowDefinition, FlowEdge, ResolvedFlowAgent } f
 type PinnedNode = { nodeId: string; model: string };
 
 /**
+ * Node/agent models can carry surrounding whitespace: `acp()` trims it, but a
+ * flow node authored as a plain object literal only gets *validated* as
+ * non-blank-when-trimmed, not trimmed, since `assertValidFlowDefinitionShape`
+ * discards its parsed result. Every reader of a model pin normalizes through
+ * here so a padded and unpadded spelling of the same model are never treated
+ * as a conflict, and so the value that reaches session creation is normalized
+ * regardless of how the node was authored.
+ */
+export function normalizeModelPin(model: string | undefined): string | undefined {
+  return model === undefined ? undefined : model.trim();
+}
+
+/**
  * Resolves a node profile to its agent, or `undefined` when it cannot be
  * resolved yet. Supplied by the runner so the preflight can also see a
  * configured `agents.<name>.model`, which is a pin the same way a node's own
@@ -59,7 +72,7 @@ function sessionModelPin(
   if (resolveAgent && !agent) {
     return undefined;
   }
-  const model = node.model ?? agent?.model;
+  const model = normalizeModelPin(node.model ?? agent?.model);
   return model === undefined ? undefined : { group: sessionGroupKey(node, agent), model };
 }
 

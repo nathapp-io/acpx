@@ -14,9 +14,12 @@ import type {
 const FLOW_NODE_TYPES = ["acp", "compute", "action", "checkpoint"] as const;
 
 const finiteNonNegativeNumberSchema = z.number().finite().nonnegative();
-const nonEmptyTrimmedStringSchema = z.string().refine((value) => value.trim().length > 0, {
-  message: "must not be empty",
-});
+const nonEmptyTrimmedStringSchema = z
+  .string()
+  .transform((value) => value.trim())
+  .refine((value) => value.length > 0, {
+    message: "must not be empty",
+  });
 
 function extensibleObject<TShape extends z.ZodRawShape>(shape: TShape) {
   return z.object(shape).passthrough();
@@ -135,8 +138,8 @@ export function assertValidFlowDefinitionShape(flow: FlowDefinition): void {
   });
 }
 
-export function assertValidAcpNodeDefinition(node: AcpNodeDefinition): void {
-  parseWithSchema("acp node definition", acpNodeSchema, node);
+export function assertValidAcpNodeDefinition(node: AcpNodeDefinition): AcpNodeDefinition {
+  return parseWithSchema("acp node definition", acpNodeSchema, node) as AcpNodeDefinition;
 }
 
 export function assertValidComputeNodeDefinition(node: ComputeNodeDefinition): void {
