@@ -189,7 +189,7 @@ export function assertReusableSessionModel(
   // The run-wide --model is deliberately excluded: it is a default for every
   // step, not a request from this node, so a node that only falls through to it
   // inherits the session's model rather than conflicting with it.
-  const pinned = normalizeModelPin(node.model ?? agent.model);
+  const pinned = normalizeModelPin(node.model) ?? normalizeModelPin(agent.model);
   // `undefined` marks a binding written before this field existed, so its model
   // is unknown; such a run keeps the old inherit-silently behavior.
   if (pinned === undefined || existing.model === undefined || pinned === existing.model) {

@@ -11,9 +11,19 @@ type PinnedNode = { nodeId: string; model: string };
  * here so a padded and unpadded spelling of the same model are never treated
  * as a conflict, and so the value that reaches session creation is normalized
  * regardless of how the node was authored.
+ *
+ * `model` is typed as `string | undefined`, but a node predating this field
+ * can carry unrelated pass-through metadata of any shape under that same
+ * key (schema validation deliberately leaves such values untouched — see
+ * `modelPinSchema` in `schema.ts`). Anything that is not a non-blank string
+ * is treated as no pin rather than coerced or thrown on.
  */
-export function normalizeModelPin(model: string | undefined): string | undefined {
-  return model === undefined ? undefined : model.trim();
+export function normalizeModelPin(model: unknown): string | undefined {
+  if (typeof model !== "string") {
+    return undefined;
+  }
+  const trimmed = model.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 /**
@@ -72,7 +82,7 @@ function sessionModelPin(
   if (resolveAgent && !agent) {
     return undefined;
   }
-  const model = normalizeModelPin(node.model ?? agent?.model);
+  const model = normalizeModelPin(node.model) ?? normalizeModelPin(agent?.model);
   return model === undefined ? undefined : { group: sessionGroupKey(node, agent), model };
 }
 

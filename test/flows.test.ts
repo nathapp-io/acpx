@@ -8,7 +8,7 @@ import { TimeoutError } from "../src/async-control.js";
 import { decision, decisionEdge } from "../src/flows/decision.js";
 import { validateFlowDefinition } from "../src/flows/graph.js";
 import { extractJsonObject, parseJsonObject, parseStrictJsonObject } from "../src/flows/json.js";
-import { validateFlowSessionModelPins } from "../src/flows/model-pins.js";
+import { normalizeModelPin, validateFlowSessionModelPins } from "../src/flows/model-pins.js";
 import { createRunId } from "../src/flows/runtime-support.js";
 import {
   FlowRunner,
@@ -2018,14 +2018,26 @@ test("acp nodes accept an optional model", () => {
   assert.equal(unpinned.model, undefined);
 });
 
-test("acp node model must be a non-empty string", () => {
-  assert.throws(() => acp({ prompt: () => "", model: "" }), /Invalid acp node definition: model/);
-  // A blank pin would otherwise suppress the agent and global fallbacks while
+test("acp node model accepts legacy pass-through metadata without throwing", () => {
+  // Before this field existed, `model` on an acp node was arbitrary
+  // pass-through metadata: any key of any type validated fine and was never
+  // consumed. Rejecting a non-string or blank value now would turn a flow
+  // that validated fine on an older version into one that throws on
+  // upgrade, so such values are preserved as-is (matching the old
+  // passthrough behavior) and simply not treated as a pin — a blank pin
+  // would otherwise suppress the agent and global fallbacks while
   // requesting no model at all.
-  assert.throws(
-    () => acp({ prompt: () => "", model: "   " }),
-    /Invalid acp node definition: model/,
-  );
+  const nonString = acp({ prompt: () => "", model: 42 as unknown as string });
+  assert.equal(nonString.model, 42);
+  assert.equal(normalizeModelPin(nonString.model), undefined);
+
+  const blank = acp({ prompt: () => "", model: "" });
+  assert.equal(blank.model, "");
+  assert.equal(normalizeModelPin(blank.model), undefined);
+
+  const whitespaceOnly = acp({ prompt: () => "", model: "   " });
+  assert.equal(whitespaceOnly.model, "   ");
+  assert.equal(normalizeModelPin(whitespaceOnly.model), undefined);
 });
 
 test("acp node model is trimmed of surrounding whitespace", () => {

@@ -31,6 +31,25 @@ function functionSchema<T extends Function>(label: string): z.ZodType<T> {
   });
 }
 
+/**
+ * Before this field existed, `model` on an `acp` node was arbitrary
+ * pass-through metadata: `extensibleObject`'s `.passthrough()` accepted any
+ * key of any type and never validated it. Rejecting a non-string or blank
+ * value now would turn a flow that validated fine on an older version into
+ * one that throws on upgrade, and silently applying an unrelated string
+ * value as a model pin would change agent behavior with no signal. A
+ * genuine non-blank string pin is trimmed and used exactly as before;
+ * anything else is left untouched (not treated as a pin) rather than
+ * rejected, matching the old passthrough behavior for callers who used this
+ * key for something else.
+ */
+const modelPinSchema = z
+  .unknown()
+  .optional()
+  .transform((value) => (typeof value === "string" ? value.trim() || value : value)) as z.ZodType<
+  string | undefined
+>;
+
 const flowNodeCommonShape = {
   timeoutMs: finiteNonNegativeNumberSchema.optional(),
   heartbeatMs: finiteNonNegativeNumberSchema.optional(),
@@ -61,7 +80,7 @@ const acpNodeSchema = extensibleObject({
   ...flowNodeCommonShape,
   nodeType: z.literal("acp"),
   profile: z.string().optional(),
-  model: nonEmptyTrimmedStringSchema.optional(),
+  model: modelPinSchema,
   cwd: z
     .union([
       z.string(),

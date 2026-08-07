@@ -10,7 +10,7 @@ Repo: https://github.com/openclaw/acpx
 
 - Docs/readme: rewrite the project front door to the house standard and route detailed CLI guidance to the existing documentation.
 - Agent entries in config accept an optional `model`, used as the default model for sessions started with that agent. It seeds a session at creation only, so `set model` on a live session is preserved; an explicit `--model` still wins.
-- Flow `acp` nodes accept an optional `model`. Precedence per step is node model, then the resolved agent's configured model, then the run-wide `--model`.
+- Flow `acp` nodes accept an optional `model`. Precedence per step is node model, then the resolved agent's configured model, then the run-wide `--model`. A pre-existing `model` value that is not a non-blank string (this key was unvalidated pass-through metadata before this release) is left untouched and simply not treated as a pin, so an older flow definition that happened to use this key for something else keeps validating instead of throwing on upgrade.
 
 ### Breaking
 
